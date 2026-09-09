@@ -28,28 +28,37 @@ class MainActivity : ComponentActivity() {
 private fun AiApp() {
     var input by remember { mutableStateOf("") }
     var messages by remember { mutableStateOf(listOf<Message>()) }
-    var drawerOpen by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
 
     ModalNavigationDrawer(
-        drawerState = rememberDrawerState(if (drawerOpen) DrawerValue.Open else DrawerValue.Closed),
+        drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet {
                 Text("AI", fontSize = 28.sp, modifier = Modifier.padding(24.dp))
                 NavigationDrawerItem(
                     label = { Text("گفت‌وگوی جدید") }, selected = false,
-                    onClick = { messages = emptyList(); drawerOpen = false },
+                    onClick = {
+                        messages = emptyList()
+                        scope.launch { drawerState.close() }
+                    },
                     modifier = Modifier.padding(horizontal = 12.dp)
                 )
                 NavigationDrawerItem(
                     label = { Text("درباره برنامه") }, selected = false,
-                    onClick = { showInfo = true; drawerOpen = false },
+                    onClick = {
+                        showInfo = true
+                        scope.launch { drawerState.close() }
+                    },
                     modifier = Modifier.padding(horizontal = 12.dp)
                 )
             }
         }
     ) {
-        ChatScreen(input, { input = it }, messages, { messages = it }, { drawerOpen = true })
+        ChatScreen(input, { input = it }, messages, { messages = it }) {
+            scope.launch { drawerState.open() }
+        }
     }
 
     if (showInfo) {
@@ -62,6 +71,7 @@ private fun AiApp() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatScreen(
     input: String,

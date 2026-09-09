@@ -15,6 +15,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.runtime.CompositionLocalProvider
+import com.kazembarani.ai.local.LocalBuildAgent
+import com.kazembarani.ai.local.LocalBuildManagerScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -28,7 +30,8 @@ private data class Message(val text: String, val fromUser: Boolean)
 private enum class AiMode(val title: String, val path: String) {
     CHAT("پاسخ و جست‌وجوی وب", "/v1/chat"),
     CODE("کدنویسی", "/v1/code"),
-    ANDROID("ساخت پروژه اندروید", "/v1/android-project")
+    ANDROID("ساخت پروژه اندروید", "/v1/android-project"),
+    LOCAL_BUILD("ساخت و تست روی گوشی", "")
 }
 
 private val httpClient = OkHttpClient()
@@ -58,7 +61,7 @@ private suspend fun askAi(message: String, mode: AiMode): String = withContext(D
                 val name = json.optString("name", "پروژه اندروید")
                 val summary = json.optString("summary", "پروژه تولید شد.")
                 val files = json.optJSONArray("files")?.length() ?: 0
-                return@withContext "✅ $name\n\n$summary\n\n📁 تعداد فایل‌های تولیدشده: $files\n\nنسخه بعدی می‌تواند همین پروژه را به‌صورت خودکار وارد فرایند Build کند و APK بسازد."
+                return@withContext "✅ $name\n\n$summary\n\n📁 تعداد فایل‌های تولیدشده: $files\n\nپروژه می‌تواند وارد Local Build Manager شود."
             }
             json.optString("text", "پاسخی دریافت نشد.")
         }
@@ -78,6 +81,8 @@ private fun AiApp() {
         var mode by remember { mutableStateOf(AiMode.CHAT) }
         val drawerState = rememberDrawerState(DrawerValue.Closed)
         val scope = rememberCoroutineScope()
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val localAgent = remember(context) { LocalBuildAgent(context.applicationContext) }
 
         ModalNavigationDrawer(
             drawerState = drawerState,
@@ -104,31 +109,45 @@ private fun AiApp() {
                 }
             }
         ) {
-            ChatScreen(
-                mode = mode, input = input, onInput = { input = it }, messages = messages,
-                loading = loading,
-                onSend = {
-                    val text = input.trim()
-                    if (text.isNotEmpty() && !loading) {
-                        messages = messages + Message(text, true)
-                        input = ""
-                        loading = true
-                        scope.launch {
-                            messages = messages + Message(askAi(text, mode), false)
-                            loading = false
-                        }
+            if (mode == AiMode.LOCAL_BUILD) {
+                Scaffold(
+                    topBar = {
+                        TopAppBar(title = { Text(mode.title) }, navigationIcon = {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) { Text("☰", fontSize = 24.sp) }
+                        })
                     }
-                },
-                onMenu = { scope.launch { drawerState.open() } }
-            )
+                ) { padding ->
+                    Box(Modifier.fillMaxSize().padding(padding)) {
+                        LocalBuildManagerScreen(localAgent)
+                    }
+                }
+            } else {
+                ChatScreen(
+                    mode = mode, input = input, onInput = { input = it }, messages = messages,
+                    loading = loading,
+                    onSend = {
+                        val text = input.trim()
+                        if (text.isNotEmpty() && !loading) {
+                            messages = messages + Message(text, true)
+                            input = ""
+                            loading = true
+                            scope.launch {
+                                messages = messages + Message(askAi(text, mode), false)
+                                loading = false
+                            }
+                        }
+                    },
+                    onMenu = { scope.launch { drawerState.open() } }
+                )
+            }
         }
 
         if (showInfo) {
             AlertDialog(
                 onDismissRequest = { showInfo = false },
                 confirmButton = { TextButton(onClick = { showInfo = false }) { Text("باشه") } },
-                title = { Text("AI — نسخه ۱") },
-                text = { Text("این نسخه سه حالت دارد: پاسخ و جست‌وجوی وب، کدنویسی، و تولید ساختار پروژه اندروید. کلید OpenAI داخل APK قرار نمی‌گیرد.") }
+                title = { Text("AI — نسخه ۲") },
+                text = { Text("این نسخه علاوه بر پاسخ، کدنویسی و تولید پروژه، یک Local Build Manager برای آماده‌سازی ساخت و تست روی خود گوشی دارد. کلید OpenAI داخل APK قرار نمی‌گیرد.") }
             )
         }
     }

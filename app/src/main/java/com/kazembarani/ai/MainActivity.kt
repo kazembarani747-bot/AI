@@ -15,14 +15,48 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.runtime.CompositionLocalProvider
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 
 private data class Message(val text: String, val fromUser: Boolean)
+
+private val httpClient = OkHttpClient()
+private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent { AiApp() }
+    }
+}
+
+private suspend fun askAi(message: String): String = withContext(Dispatchers.IO) {
+    if (BuildConfig.AI_API_URL.contains("YOUR_BACKEND_URL")) {
+        return@withContext "اتصال سرور هنوز تنظیم نشده است. بک‌اند امن برنامه باید قبل از استفاده نهایی روی یک آدرس واقعی قرار بگیرد."
+    }
+
+    val payload = JSONObject().put("message", message).toString()
+    val request = Request.Builder()
+        .url(BuildConfig.AI_API_URL)
+        .post(payload.toRequestBody(jsonMediaType))
+        .build()
+
+    try {
+        httpClient.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                return@withContext "خطا در ارتباط با سرور AI (${response.code})."
+            }
+            JSONObject(body).optString("text", "پاسخی دریافت نشد.")
+        }
+    } catch (e: Exception) {
+        "ارتباط با سرور برقرار نشد. اینترنت و آدرس بک‌اند را بررسی کن."
     }
 }
 
@@ -33,6 +67,7 @@ private fun AiApp() {
         var input by remember { mutableStateOf("") }
         var messages by remember { mutableStateOf(listOf<Message>()) }
         var showInfo by remember { mutableStateOf(false) }
+        var loading by remember { mutableStateOf(false) }
         val drawerState = rememberDrawerState(DrawerValue.Closed)
         val scope = rememberCoroutineScope()
 
@@ -60,9 +95,26 @@ private fun AiApp() {
                 }
             }
         ) {
-            ChatScreen(input, { input = it }, messages, { messages = it }) {
-                scope.launch { drawerState.open() }
-            }
+            ChatScreen(
+                input = input,
+                onInput = { input = it },
+                messages = messages,
+                loading = loading,
+                onSend = {
+                    val text = input.trim()
+                    if (text.isNotEmpty() && !loading) {
+                        messages = messages + Message(text, true)
+                        input = ""
+                        loading = true
+                        scope.launch {
+                            val answer = askAi(text)
+                            messages = messages + Message(answer, false)
+                            loading = false
+                        }
+                    }
+                },
+                onMenu = { scope.launch { drawerState.open() } }
+            )
         }
 
         if (showInfo) {
@@ -70,7 +122,7 @@ private fun AiApp() {
                 onDismissRequest = { showInfo = false },
                 confirmButton = { TextButton(onClick = { showInfo = false }) { Text("باشه") } },
                 title = { Text("AI — نسخه ۱") },
-                text = { Text("نسخه اول رابط چت و مدیریت گفت‌وگوها را دارد. اتصال امن به سرویس هوش مصنوعی از طریق بک‌اند انجام می‌شود تا کلید API داخل APK قرار نگیرد.") }
+                text = { Text("این نسخه به یک بک‌اند امن متصل می‌شود. کلید OpenAI داخل APK قرار نمی‌گیرد و جست‌وجوی وب از سمت سرور انجام می‌شود.") }
             )
         }
     }
@@ -82,7 +134,8 @@ private fun ChatScreen(
     input: String,
     onInput: (String) -> Unit,
     messages: List<Message>,
-    onMessages: (List<Message>) -> Unit,
+    loading: Boolean,
+    onSend: () -> Unit,
     onMenu: () -> Unit
 ) {
     Scaffold(
@@ -94,17 +147,17 @@ private fun ChatScreen(
         bottomBar = {
             Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
-                    value = input, onValueChange = onInput, modifier = Modifier.weight(1f),
-                    placeholder = { Text("پیامت را بنویس...") }, maxLines = 4
+                    value = input,
+                    onValueChange = onInput,
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("پیامت را بنویس...") },
+                    maxLines = 4,
+                    enabled = !loading
                 )
                 Spacer(Modifier.width(8.dp))
-                Button(onClick = {
-                    val text = input.trim()
-                    if (text.isNotEmpty()) {
-                        onMessages(messages + Message(text, true) + Message("رابط نسخه اول آماده است؛ اتصال امن به سرویس AI در مرحله بعد فعال می‌شود. 🚀", false))
-                        onInput("")
-                    }
-                }) { Text("ارسال") }
+                Button(onClick = onSend, enabled = input.isNotBlank() && !loading) {
+                    Text(if (loading) "..." else "ارسال")
+                }
             }
         }
     ) { padding ->
@@ -121,6 +174,15 @@ private fun ChatScreen(
                     ) {
                         Surface(tonalElevation = 2.dp, shape = MaterialTheme.shapes.medium) {
                             Text(msg.text, Modifier.padding(12.dp), fontSize = 16.sp)
+                        }
+                    }
+                }
+                if (loading) {
+                    item {
+                        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = Arrangement.End) {
+                            Surface(tonalElevation = 2.dp, shape = MaterialTheme.shapes.medium) {
+                                Text("در حال فکر کردن…", Modifier.padding(12.dp), fontSize = 16.sp)
+                            }
                         }
                     }
                 }

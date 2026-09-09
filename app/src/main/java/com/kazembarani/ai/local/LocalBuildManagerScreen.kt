@@ -18,16 +18,19 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
 fun LocalBuildManagerScreen(agent: LocalBuildAgent) {
     var state by remember { mutableStateOf<BuildManagerState>(BuildManagerState.Idle) }
     var status by remember { mutableStateOf<LocalBuildAgent.ToolchainStatus?>(null) }
+    val scope = rememberCoroutineScope()
 
     suspend fun refresh() {
         state = BuildManagerState.Inspecting
@@ -75,11 +78,13 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent) {
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { state = BuildManagerState.Inspecting }) { Text("بررسی دوباره") }
+                Button(
+                    enabled = state !is BuildManagerState.Inspecting,
+                    onClick = { scope.launch { refresh() } }
+                ) { Text("بررسی دوباره") }
                 OutlinedButton(onClick = {
                     state = BuildManagerState.Preparing
-                    // Real download/install is intentionally delegated to the future
-                    // trusted toolchain runtime; no arbitrary executable is launched here.
+                    // Download/install is intentionally delegated to the future trusted runtime.
                 }) { Text("آماده‌سازی") }
             }
         }

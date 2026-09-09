@@ -29,11 +29,13 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent) {
     var state by remember { mutableStateOf<BuildManagerState>(BuildManagerState.Idle) }
     var status by remember { mutableStateOf<LocalBuildAgent.ToolchainStatus?>(null) }
 
-    LaunchedEffect(Unit) {
+    suspend fun refresh() {
         state = BuildManagerState.Inspecting
         status = withContext(Dispatchers.IO) { agent.inspectToolchain() }
         state = BuildManagerState.Ready(status!!)
     }
+
+    LaunchedEffect(Unit) { refresh() }
 
     LazyColumn(
         modifier = Modifier.padding(16.dp),
@@ -42,7 +44,7 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent) {
         item {
             Text("Local Build Manager", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.padding(3.dp))
-            Text("ساخت و تست پروژه روی خود گوشی؛ GitHub برای Build لازم نیست.")
+            Text("هدف: تولید پروژه، Build و تست روی خود گوشی؛ GitHub فقط برای ذخیره/همگام‌سازی اختیاری است.")
         }
         item {
             Card(Modifier.fillMaxWidth()) {
@@ -58,6 +60,8 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent) {
                             ToolRow("Android SDK", current.status.hasAndroidSdk)
                             ToolRow("Gradle", current.status.hasGradle)
                             ToolRow("ADB", current.status.hasAdb)
+                            ToolRow("Android CLI", current.status.hasAndroidCli)
+                            Text("فضای آزاد: ${formatBytes(current.status.freeBytes)}")
                             Text(current.status.note)
                         }
                         BuildManagerState.Preparing -> Text("در حال آماده‌سازی Toolchain…")
@@ -71,32 +75,44 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent) {
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = {
-                    state = BuildManagerState.Inspecting
-                    status = null
-                }) { Text("بررسی دوباره") }
+                Button(onClick = { state = BuildManagerState.Inspecting }) { Text("بررسی دوباره") }
                 OutlinedButton(onClick = {
                     state = BuildManagerState.Preparing
+                    // Real download/install is intentionally delegated to the future
+                    // trusted toolchain runtime; no arbitrary executable is launched here.
                 }) { Text("آماده‌سازی") }
             }
         }
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("مراحل بعدی", style = MaterialTheme.typography.titleMedium)
-                    Text("1. دانلود امن JDK و ابزارهای Android")
-                    Text("2. نصب/به‌روزرسانی SDK و Build Tools")
-                    Text("3. دریافت پروژه تولیدشده توسط AI")
-                    Text("4. Gradle Build محلی")
-                    Text("5. نصب APK و اجرای تست‌های دستگاه")
-                    Text("6. جمع‌آوری Logcat و ارسال خطا به AI برای اصلاح")
+                    Text("پایپ‌لاین هدف", style = MaterialTheme.typography.titleMedium)
+                    Text("1. دریافت BuildPlan از AI")
+                    Text("2. اعتبارسنجی مسیرها و ذخیره پروژه")
+                    Text("3. آماده‌سازی JDK / Android SDK / Build Tools")
+                    Text("4. اجرای Build محلی از طریق Runtime مورداعتماد")
+                    Text("5. نصب APK و اجرای تست روی دستگاه")
+                    Text("6. جمع‌آوری Logcat، layout و screenshot")
+                    Text("7. ارسال خطا به AI → اصلاح → Build مجدد")
                 }
             }
+        }
+        item {
+            Text(
+                "نکته: Android 10+ اجرای فایل اجرایی از home directory قابل‌نوشتن برنامه را محدود می‌کند؛ بنابراین Build Agent عمداً shell آزاد ندارد و باید با یک Runtime سازگار و مورداعتماد تکمیل شود.",
+                style = MaterialTheme.typography.bodySmall
+            )
         }
     }
 }
 
 @Composable
 private fun ToolRow(name: String, installed: Boolean) {
-    Text(if (installed) "✅ $name" else "⬜ $name — نصب نشده")
+    Text(if (installed) "✅ $name" else "⬜ $name — آماده نیست")
+}
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1024L * 1024 * 1024 -> "%.1f GB".format(bytes / (1024.0 * 1024 * 1024))
+    bytes >= 1024L * 1024 -> "%.0f MB".format(bytes / (1024.0 * 1024))
+    else -> "$bytes B"
 }

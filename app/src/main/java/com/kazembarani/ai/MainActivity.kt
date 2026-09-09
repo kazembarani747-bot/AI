@@ -25,6 +25,11 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 
 private data class Message(val text: String, val fromUser: Boolean)
+private enum class AiMode(val title: String, val path: String) {
+    CHAT("پاسخ و جست‌وجوی وب", "/v1/chat"),
+    CODE("کدنویسی", "/v1/code"),
+    ANDROID("ساخت پروژه اندروید", "/v1/android-project")
+}
 
 private val httpClient = OkHttpClient()
 private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
@@ -36,24 +41,26 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private suspend fun askAi(message: String): String = withContext(Dispatchers.IO) {
+private suspend fun askAi(message: String, mode: AiMode): String = withContext(Dispatchers.IO) {
     if (BuildConfig.AI_API_URL.contains("YOUR_BACKEND_URL")) {
-        return@withContext "اتصال سرور هنوز تنظیم نشده است. بک‌اند امن برنامه باید قبل از استفاده نهایی روی یک آدرس واقعی قرار بگیرد."
+        return@withContext "اتصال سرور هنوز تنظیم نشده است. بک‌اند امن برنامه باید روی یک آدرس واقعی قرار بگیرد."
     }
-
+    val baseUrl = BuildConfig.AI_API_URL.substringBeforeLast("/v1/chat")
+    val url = baseUrl + mode.path
     val payload = JSONObject().put("message", message).toString()
-    val request = Request.Builder()
-        .url(BuildConfig.AI_API_URL)
-        .post(payload.toRequestBody(jsonMediaType))
-        .build()
-
+    val request = Request.Builder().url(url).post(payload.toRequestBody(jsonMediaType)).build()
     try {
         httpClient.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                return@withContext "خطا در ارتباط با سرور AI (${response.code})."
+            if (!response.isSuccessful) return@withContext "خطا در ارتباط با سرور AI (${response.code})."
+            val json = JSONObject(body)
+            if (mode == AiMode.ANDROID) {
+                val name = json.optString("name", "پروژه اندروید")
+                val summary = json.optString("summary", "پروژه تولید شد.")
+                val files = json.optJSONArray("files")?.length() ?: 0
+                return@withContext "✅ $name\n\n$summary\n\n📁 تعداد فایل‌های تولیدشده: $files\n\nنسخه بعدی می‌تواند همین پروژه را به‌صورت خودکار وارد فرایند Build کند و APK بسازد."
             }
-            JSONObject(body).optString("text", "پاسخی دریافت نشد.")
+            json.optString("text", "پاسخی دریافت نشد.")
         }
     } catch (e: Exception) {
         "ارتباط با سرور برقرار نشد. اینترنت و آدرس بک‌اند را بررسی کن."
@@ -68,6 +75,7 @@ private fun AiApp() {
         var messages by remember { mutableStateOf(listOf<Message>()) }
         var showInfo by remember { mutableStateOf(false) }
         var loading by remember { mutableStateOf(false) }
+        var mode by remember { mutableStateOf(AiMode.CHAT) }
         val drawerState = rememberDrawerState(DrawerValue.Closed)
         val scope = rememberCoroutineScope()
 
@@ -76,29 +84,28 @@ private fun AiApp() {
             drawerContent = {
                 ModalDrawerSheet {
                     Text("AI", fontSize = 28.sp, modifier = Modifier.padding(24.dp))
+                    AiMode.values().forEach { item ->
+                        NavigationDrawerItem(
+                            label = { Text(item.title) }, selected = mode == item,
+                            onClick = { mode = item; scope.launch { drawerState.close() } },
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        )
+                    }
                     NavigationDrawerItem(
                         label = { Text("گفت‌وگوی جدید") }, selected = false,
-                        onClick = {
-                            messages = emptyList()
-                            scope.launch { drawerState.close() }
-                        },
+                        onClick = { messages = emptyList(); scope.launch { drawerState.close() } },
                         modifier = Modifier.padding(horizontal = 12.dp)
                     )
                     NavigationDrawerItem(
                         label = { Text("درباره برنامه") }, selected = false,
-                        onClick = {
-                            showInfo = true
-                            scope.launch { drawerState.close() }
-                        },
+                        onClick = { showInfo = true; scope.launch { drawerState.close() } },
                         modifier = Modifier.padding(horizontal = 12.dp)
                     )
                 }
             }
         ) {
             ChatScreen(
-                input = input,
-                onInput = { input = it },
-                messages = messages,
+                mode = mode, input = input, onInput = { input = it }, messages = messages,
                 loading = loading,
                 onSend = {
                     val text = input.trim()
@@ -107,8 +114,7 @@ private fun AiApp() {
                         input = ""
                         loading = true
                         scope.launch {
-                            val answer = askAi(text)
-                            messages = messages + Message(answer, false)
+                            messages = messages + Message(askAi(text, mode), false)
                             loading = false
                         }
                     }
@@ -122,7 +128,7 @@ private fun AiApp() {
                 onDismissRequest = { showInfo = false },
                 confirmButton = { TextButton(onClick = { showInfo = false }) { Text("باشه") } },
                 title = { Text("AI — نسخه ۱") },
-                text = { Text("این نسخه به یک بک‌اند امن متصل می‌شود. کلید OpenAI داخل APK قرار نمی‌گیرد و جست‌وجوی وب از سمت سرور انجام می‌شود.") }
+                text = { Text("این نسخه سه حالت دارد: پاسخ و جست‌وجوی وب، کدنویسی، و تولید ساختار پروژه اندروید. کلید OpenAI داخل APK قرار نمی‌گیرد.") }
             )
         }
     }
@@ -131,28 +137,21 @@ private fun AiApp() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatScreen(
-    input: String,
-    onInput: (String) -> Unit,
-    messages: List<Message>,
-    loading: Boolean,
-    onSend: () -> Unit,
-    onMenu: () -> Unit
+    mode: AiMode, input: String, onInput: (String) -> Unit, messages: List<Message>,
+    loading: Boolean, onSend: () -> Unit, onMenu: () -> Unit
 ) {
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("AI") }, navigationIcon = {
+            TopAppBar(title = { Text(mode.title) }, navigationIcon = {
                 IconButton(onClick = onMenu) { Text("☰", fontSize = 24.sp) }
             })
         },
         bottomBar = {
             Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
-                    value = input,
-                    onValueChange = onInput,
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("پیامت را بنویس...") },
-                    maxLines = 4,
-                    enabled = !loading
+                    value = input, onValueChange = onInput, modifier = Modifier.weight(1f),
+                    placeholder = { Text(if (mode == AiMode.ANDROID) "مثلاً: یک اپ یادداشت بساز..." else "پیامت را بنویس...") },
+                    maxLines = 4, enabled = !loading
                 )
                 Spacer(Modifier.width(8.dp))
                 Button(onClick = onSend, enabled = input.isNotBlank() && !loading) {
@@ -163,7 +162,7 @@ private fun ChatScreen(
     ) { padding ->
         if (messages.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("سلام! 👋\nسؤال خودت را بپرس تا با هم جلو برویم.", textAlign = TextAlign.Center, fontSize = 20.sp)
+                Text("سلام! 👋\nحالت «${mode.title}» فعال است.", textAlign = TextAlign.Center, fontSize = 20.sp)
             }
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
@@ -177,12 +176,10 @@ private fun ChatScreen(
                         }
                     }
                 }
-                if (loading) {
-                    item {
-                        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = Arrangement.End) {
-                            Surface(tonalElevation = 2.dp, shape = MaterialTheme.shapes.medium) {
-                                Text("در حال فکر کردن…", Modifier.padding(12.dp), fontSize = 16.sp)
-                            }
+                if (loading) item {
+                    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = Arrangement.End) {
+                        Surface(tonalElevation = 2.dp, shape = MaterialTheme.shapes.medium) {
+                            Text("در حال کار کردن…", Modifier.padding(12.dp), fontSize = 16.sp)
                         }
                     }
                 }

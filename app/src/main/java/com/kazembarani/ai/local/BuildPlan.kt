@@ -21,21 +21,33 @@ data class BuildPlan(
 
     companion object {
         fun fromJson(json: JSONObject): BuildPlan {
-            val filesJson = json.optJSONObject("files") ?: JSONObject()
-            val files = buildMap {
-                filesJson.keys().forEach { put(it, filesJson.optString(it)) }
+            val filesObject = json.optJSONObject("files")
+            val files = if (filesObject != null) {
+                buildMap {
+                    filesObject.keys().forEach { key -> put(key, filesObject.optString(key)) }
+                }
+            } else {
+                // /v1/android-project currently returns files as [{path, content}, ...].
+                val filesArray = json.optJSONArray("files") ?: JSONArray()
+                buildMap {
+                    for (i in 0 until filesArray.length()) {
+                        val item = filesArray.optJSONObject(i) ?: continue
+                        val path = item.optString("path").trim()
+                        if (path.isNotEmpty()) put(path, item.optString("content"))
+                    }
+                }
             }
+
             return BuildPlan(
-                projectName = json.optString("projectName", "GeneratedApp"),
+                projectName = json.optString("projectName", json.optString("name", "GeneratedApp")),
                 summary = json.optString("summary", "پروژه تولیدشده توسط AI"),
                 files = files,
-                buildTasks = json.optJSONArray("buildTasks")?.let { array ->
-                    (0 until array.length()).map { array.optString(it) }.filter { it.isNotBlank() }
-                } ?: listOf("assembleDebug"),
-                testTasks = json.optJSONArray("testTasks")?.let { array ->
-                    (0 until array.length()).map { array.optString(it) }.filter { it.isNotBlank() }
-                } ?: emptyList()
+                buildTasks = json.optJSONArray("buildTasks")?.toStringList() ?: listOf("assembleDebug"),
+                testTasks = json.optJSONArray("testTasks")?.toStringList() ?: emptyList()
             )
         }
+
+        private fun JSONArray.toStringList(): List<String> =
+            (0 until length()).map { optString(it) }.filter { it.isNotBlank() }
     }
 }

@@ -8,6 +8,7 @@ class ProjectStore(private val agent: LocalBuildAgent) {
     private val metadataDir = File(agent.workspace, "project-metadata").apply { mkdirs() }
 
     fun save(plan: BuildPlan): File {
+        validateProjectName(plan.projectName)
         val project = agent.prepareBuild(plan)
         val metadata = File(metadataDir, "${plan.projectName}.json")
         metadata.writeText(plan.toJson().toString())
@@ -15,8 +16,14 @@ class ProjectStore(private val agent: LocalBuildAgent) {
     }
 
     fun load(projectName: String): BuildPlan? {
-        val file = File(metadataDir, "$projectName.json")
-        if (!file.isFile) return null
+        validateProjectName(projectName)
+        val file = File(metadataDir, "$projectName.json").canonicalFile
+        if (!file.path.startsWith(metadataDir.canonicalPath + File.separator) || !file.isFile) return null
         return BuildPlan.fromJson(JSONObject(file.readText()))
+    }
+
+    private fun validateProjectName(name: String) {
+        require(name.matches(Regex("[A-Za-z0-9._-]+"))) { "نام پروژه نامعتبر است." }
+        require(name.length <= 80) { "نام پروژه بیش از حد طولانی است." }
     }
 }

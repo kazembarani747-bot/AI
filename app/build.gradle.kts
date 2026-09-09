@@ -7,6 +7,7 @@ plugins {
 android {
     namespace = "com.kazembarani.ai"
     compileSdk = 35
+    buildFeatures { buildConfig = true }
 
     defaultConfig {
         applicationId = "com.kazembarani.ai"
@@ -14,6 +15,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+        buildConfigField("String", "AI_API_URL", "\"https://YOUR_BACKEND_URL/v1/chat\"")
     }
 
     compileOptions {

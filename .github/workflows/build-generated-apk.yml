@@ -1,0 +1,44 @@
+name: Build Generated APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'generated-app/**'
+      - '.github/workflows/build-generated-apk.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: generated-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Dorg.gradle.caching=true -Dkotlin.incremental=true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10'
+          cache-read-only: false
+      - name: Build generated debug APK
+        run: gradle -p generated-app :app:assembleDebug --no-daemon --parallel --build-cache
+      - name: Upload generated APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-app-debug-apk
+          path: generated-app/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30

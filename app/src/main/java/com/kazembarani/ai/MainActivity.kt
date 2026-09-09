@@ -13,6 +13,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.runtime.CompositionLocalProvider
+import kotlinx.coroutines.launch
 
 private data class Message(val text: String, val fromUser: Boolean)
 
@@ -26,48 +29,50 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AiApp() {
-    var input by remember { mutableStateOf("") }
-    var messages by remember { mutableStateOf(listOf<Message>()) }
-    var showInfo by remember { mutableStateOf(false) }
-    val drawerState = rememberDrawerState(DrawerValue.Closed)
-    val scope = rememberCoroutineScope()
+    CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides LayoutDirection.Rtl) {
+        var input by remember { mutableStateOf("") }
+        var messages by remember { mutableStateOf(listOf<Message>()) }
+        var showInfo by remember { mutableStateOf(false) }
+        val drawerState = rememberDrawerState(DrawerValue.Closed)
+        val scope = rememberCoroutineScope()
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            ModalDrawerSheet {
-                Text("AI", fontSize = 28.sp, modifier = Modifier.padding(24.dp))
-                NavigationDrawerItem(
-                    label = { Text("گفت‌وگوی جدید") }, selected = false,
-                    onClick = {
-                        messages = emptyList()
-                        scope.launch { drawerState.close() }
-                    },
-                    modifier = Modifier.padding(horizontal = 12.dp)
-                )
-                NavigationDrawerItem(
-                    label = { Text("درباره برنامه") }, selected = false,
-                    onClick = {
-                        showInfo = true
-                        scope.launch { drawerState.close() }
-                    },
-                    modifier = Modifier.padding(horizontal = 12.dp)
-                )
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            drawerContent = {
+                ModalDrawerSheet {
+                    Text("AI", fontSize = 28.sp, modifier = Modifier.padding(24.dp))
+                    NavigationDrawerItem(
+                        label = { Text("گفت‌وگوی جدید") }, selected = false,
+                        onClick = {
+                            messages = emptyList()
+                            scope.launch { drawerState.close() }
+                        },
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    )
+                    NavigationDrawerItem(
+                        label = { Text("درباره برنامه") }, selected = false,
+                        onClick = {
+                            showInfo = true
+                            scope.launch { drawerState.close() }
+                        },
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    )
+                }
+            }
+        ) {
+            ChatScreen(input, { input = it }, messages, { messages = it }) {
+                scope.launch { drawerState.open() }
             }
         }
-    ) {
-        ChatScreen(input, { input = it }, messages, { messages = it }) {
-            scope.launch { drawerState.open() }
-        }
-    }
 
-    if (showInfo) {
-        AlertDialog(
-            onDismissRequest = { showInfo = false },
-            confirmButton = { TextButton(onClick = { showInfo = false }) { Text("باشه") } },
-            title = { Text("AI — نسخه ۱") },
-            text = { Text("نسخه اول رابط چت و مدیریت گفت‌وگوها را دارد. اتصال امن به سرویس هوش مصنوعی از طریق بک‌اند انجام می‌شود تا کلید API داخل APK قرار نگیرد.") }
-        )
+        if (showInfo) {
+            AlertDialog(
+                onDismissRequest = { showInfo = false },
+                confirmButton = { TextButton(onClick = { showInfo = false }) { Text("باشه") } },
+                title = { Text("AI — نسخه ۱") },
+                text = { Text("نسخه اول رابط چت و مدیریت گفت‌وگوها را دارد. اتصال امن به سرویس هوش مصنوعی از طریق بک‌اند انجام می‌شود تا کلید API داخل APK قرار نگیرد.") }
+            )
+        }
     }
 }
 

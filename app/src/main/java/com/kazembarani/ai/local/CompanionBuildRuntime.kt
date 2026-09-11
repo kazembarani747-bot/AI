@@ -6,25 +6,17 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Base64
 
-/**
- * Trusted-runtime client. The Android app never executes generated binaries or shell commands;
- * it sends a bounded BuildPlan to a user-approved Companion Runtime.
- */
-class CompanionBuildRuntime(
-    private val baseUrl: String = "http://127.0.0.1:8787"
-) : BuildRuntime {
+/** Trusted-runtime client: generated code never gets executed by the Android app itself. */
+class CompanionBuildRuntime(private val baseUrl: String = "http://127.0.0.1:8787") : BuildRuntime {
     private fun request(path: String, payload: JSONObject? = null, timeoutMs: Int = 1_200_000): JSONObject {
-        val connection = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection).apply {
+        val c = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection).apply {
             requestMethod = if (payload == null) "GET" else "POST"
-            connectTimeout = 10_000
-            readTimeout = timeoutMs
-            doInput = true
+            connectTimeout = 10_000; readTimeout = timeoutMs; doInput = true
             if (payload != null) { doOutput = true; setRequestProperty("Content-Type", "application/json") }
         }
-        payload?.toString()?.toByteArray(Charsets.UTF_8)?.let { connection.outputStream.use { it.write(it) } }
-        val text = (if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream)
-            .bufferedReader().use { it.readText() }
-        if (connection.responseCode !in 200..299) error("Runtime HTTP ${connection.responseCode}: $text")
+        payload?.toString()?.toByteArray(Charsets.UTF_8)?.let { c.outputStream.use { it.write(it) } }
+        val text = (if (c.responseCode in 200..299) c.inputStream else c.errorStream).bufferedReader().use { it.readText() }
+        if (c.responseCode !in 200..299) error("Runtime HTTP ${c.responseCode}: $text")
         return JSONObject(text)
     }
 
@@ -45,8 +37,8 @@ class CompanionBuildRuntime(
 
     override fun build(project: File, tasks: List<String>): BuildRuntime.CommandResult = runCatching {
         val r = request("/build", projectPayload(project, tasks))
-        val apkPath = r.optString("artifact").takeIf { it.isNotBlank() }
-        val artifact = apkPath?.let { downloadArtifact(it, File(project, "app/build/outputs/apk/debug/app-debug.apk")) }
+        val remote = r.optString("artifact").takeIf { it.isNotBlank() }
+        val artifact = remote?.let { downloadArtifact(it, File(project, "app/build/outputs/apk/debug/app-debug.apk")) }
         BuildRuntime.CommandResult(r.optInt("exitCode", 1), r.optString("output"), artifact)
     }.getOrElse { BuildRuntime.CommandResult(1, "Runtime build error: ${it.message}") }
 
@@ -56,7 +48,8 @@ class CompanionBuildRuntime(
     }.getOrElse { BuildRuntime.CommandResult(1, "Runtime test error: ${it.message}") }
 
     override fun install(apk: File): BuildRuntime.CommandResult = runCatching {
-        val r = request("/install", JSONObject().put("apk", apk.absolutePath), 300_000)
+        val encoded = Base64.getEncoder().encodeToString(apk.readBytes())
+        val r = request("/install", JSONObject().put("base64", encoded), 300_000)
         BuildRuntime.CommandResult(r.optInt("exitCode", 1), r.optString("output"))
     }.getOrElse { BuildRuntime.CommandResult(1, "Runtime install error: ${it.message}") }
 
@@ -67,20 +60,17 @@ class CompanionBuildRuntime(
 
     override fun captureScreenshot(output: File): BuildRuntime.CommandResult = runCatching {
         val r = request("/screenshot", JSONObject().put("name", output.name), 60_000)
-        if (r.optInt("exitCode", 1) == 0) {
-            output.parentFile?.mkdirs()
-            output.writeBytes(Base64.getDecoder().decode(r.getString("base64")))
-        }
+        if (r.optInt("exitCode", 1) == 0) { output.parentFile?.mkdirs(); output.writeBytes(Base64.getDecoder().decode(r.optString("base64"))) }
         BuildRuntime.CommandResult(r.optInt("exitCode", 1), r.optString("output"), output.takeIf { it.isFile })
     }.getOrElse { BuildRuntime.CommandResult(1, "Runtime screenshot error: ${it.message}") }
 
     private fun downloadArtifact(remotePath: String, target: File): File {
-        val conn = (URL(baseUrl.trimEnd('/') + "/artifact").openConnection() as HttpURLConnection).apply {
+        val c = (URL(baseUrl.trimEnd('/') + "/artifact").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"; doOutput = true; connectTimeout = 10_000; readTimeout = 300_000; setRequestProperty("Content-Type", "application/json")
         }
-        conn.outputStream.use { it.write(JSONObject().put("path", remotePath).toString().toByteArray(Charsets.UTF_8)) }
-        if (conn.responseCode !in 200..299) error("artifact HTTP ${conn.responseCode}")
-        target.parentFile?.mkdirs(); conn.inputStream.use { input -> target.outputStream().use { input.copyTo(it) } }
+        c.outputStream.use { it.write(JSONObject().put("path", remotePath).toString().toByteArray(Charsets.UTF_8)) }
+        if (c.responseCode !in 200..299) error("artifact HTTP ${c.responseCode}")
+        target.parentFile?.mkdirs(); c.inputStream.use { input -> target.outputStream().use { input.copyTo(it) } }
         return target
     }
 }

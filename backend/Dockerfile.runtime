@@ -1,0 +1,35 @@
+FROM node:20-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    ANDROID_SDK_ROOT=/opt/android-sdk \
+    ANDROID_HOME=/opt/android-sdk \
+    GRADLE_VERSION=8.10.2 \
+    PATH=/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/gradle/bin:$PATH
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openjdk-17-jdk unzip curl ca-certificates git adb \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p ${ANDROID_SDK_ROOT}/cmdline-tools \
+    && curl -fsSL -o /tmp/cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip \
+    && unzip -q /tmp/cmdline-tools.zip -d ${ANDROID_SDK_ROOT}/cmdline-tools \
+    && mv ${ANDROID_SDK_ROOT}/cmdline-tools/cmdline-tools ${ANDROID_SDK_ROOT}/cmdline-tools/latest \
+    && rm /tmp/cmdline-tools.zip \
+    && yes | sdkmanager --licenses >/dev/null || true \
+    && sdkmanager "platform-tools" "platforms;android-35" "platforms;android-36" "build-tools;35.0.0" "build-tools;36.0.0" \
+    && curl -fsSL -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip \
+    && unzip -q /tmp/gradle.zip -d /opt \
+    && ln -s /opt/gradle-${GRADLE_VERSION} /opt/gradle \
+    && rm /tmp/gradle.zip
+
+WORKDIR /app
+COPY backend/companion-runtime.mjs ./companion-runtime.mjs
+
+ENV RUNTIME_HOST=0.0.0.0 \
+    RUNTIME_PORT=8787 \
+    RUNTIME_WORKSPACE=/data/runtime-workspace \
+    GRADLE_PATH=gradle
+
+VOLUME ["/data"]
+EXPOSE 8787
+
+CMD ["node", "companion-runtime.mjs"]

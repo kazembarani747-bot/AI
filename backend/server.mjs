@@ -1,6 +1,6 @@
 import http from "node:http";
 import OpenAI from "openai";
-import { nextPlan } from "./autonomous-loop.mjs";
+import { nextPlan, normalizeBudget } from "./autonomous-loop.mjs";
 
 const port = Number(process.env.PORT || 8787);
 const apiKey = process.env.OPENAI_API_KEY;
@@ -8,6 +8,7 @@ if (!apiKey) throw new Error("OPENAI_API_KEY is required on the server.");
 
 const client = new OpenAI({ apiKey });
 const MODEL = process.env.OPENAI_MODEL || "gpt-5.6-luna";
+const MAX_BODY = 128 * 1024 * 1024;
 
 function sendJson(res, status, body) {
   res.writeHead(status, {
@@ -21,9 +22,14 @@ function sendJson(res, status, body) {
 }
 
 async function readBody(req) {
-  let raw = "";
-  for await (const chunk of req) raw += chunk;
-  return JSON.parse(raw || "{}");
+  let size = 0;
+  const chunks = [];
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > MAX_BODY) throw new Error("request body is too large");
+    chunks.push(chunk);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 
 async function normalChat(message) {
@@ -105,8 +111,9 @@ const server = http.createServer(async (req, res) => {
       const request = typeof body.request === "string" ? body.request.trim() : "";
       const feedback = typeof body.feedback === "string" ? body.feedback.trim() : null;
       if (!request) return sendJson(res, 400, { error: "request is required" });
-      const plan = await nextPlan({ request, feedback });
-      return sendJson(res, 200, { plan });
+      const budget = normalizeBudget(body.budget);
+      const plan = await nextPlan({ request, feedback, budget });
+      return sendJson(res, 200, { budget, plan });
     }
 
     const message = typeof body.message === "string" ? body.message.trim() : "";
@@ -124,7 +131,7 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 404, { error: "Not found" });
   } catch (error) {
     console.error(error);
-    sendJson(res, 500, { error: "AI request failed" });
+    sendJson(res, 500, { error: error?.message || "AI request failed" });
   }
 });
 

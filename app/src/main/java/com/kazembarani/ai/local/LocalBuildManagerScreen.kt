@@ -25,6 +25,12 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
     var finalOutput by remember { mutableStateOf("") }
     var job by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
+    val backendUrl = remember(BuildConfig.AI_API_URL) {
+        BuildConfig.AI_API_URL.substringBeforeLast("/v1/chat").trimEnd('/')
+    }
+    val backendConfigured = backendUrl.isNotBlank() &&
+        !backendUrl.contains("YOUR_BACKEND_URL") &&
+        (backendUrl.startsWith("http://") || backendUrl.startsWith("https://"))
 
     suspend fun refresh() {
         state = BuildManagerState.Inspecting
@@ -45,7 +51,7 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
     ) {
         item {
             Text("ساخت خودکار AI", style = MaterialTheme.typography.headlineSmall)
-            Text("مرحله ۱: درخواست → Planner → AutonomousWorkLoop → Build/تست → بازگشت خطا به AI")
+            Text("مرحله ۲: Planner معتبر → Build → تست Android → Logcat/Screenshot → بازخورد → اصلاح خودکار")
         }
 
         item {
@@ -80,9 +86,13 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
                         Switch(checked = install, onCheckedChange = { if (!running) install = it })
                     }
 
+                    if (!backendConfigured) {
+                        Text("🔴 Backend AI تنظیم نشده است. مقدار AI_API_URL را تنظیم کن.", color = MaterialTheme.colorScheme.error)
+                    }
+
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
-                            enabled = !running && prompt.isNotBlank() && runtimeStatus?.canBuild == true,
+                            enabled = !running && prompt.isNotBlank() && runtimeStatus?.canBuild == true && backendConfigured,
                             onClick = {
                                 progress = emptyList()
                                 finalOutput = ""
@@ -91,7 +101,7 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
                                     val coordinator = AutonomousBuildCoordinator(
                                         agent = agent,
                                         runtime = runtime,
-                                        backendUrl = BuildConfig.AI_API_URL.substringBeforeLast("/v1/chat")
+                                        backendUrl = backendUrl
                                     )
                                     try {
                                         val result = coordinator.run(
@@ -201,13 +211,13 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
 }
 
 private fun stageLabel(stage: String): String = when (stage) {
-    "PLAN" -> "برنامه‌ریزی AI"
+    "PLAN" -> "برنامه‌ریزی و اعتبارسنجی AI"
     "PREPARE" -> "آماده‌سازی"
     "BUILD" -> "ساخت APK"
     "TEST" -> "تست Android"
     "INSTALL" -> "نصب APK"
     "COMPLETE" -> "تکمیل"
-    "FAILED" -> "خطا و ارسال بازخورد به AI"
+    "FAILED" -> "خطا، Logcat/Screenshot و بازخورد به AI"
     else -> stage
 }
 

@@ -33,12 +33,8 @@ class CompanionBuildRuntime(private val baseUrl: String = "http://127.0.0.1:8787
     override fun capabilities(): BuildRuntime.Capabilities = runCatching {
         val r = request("/health")
         BuildRuntime.Capabilities(
-            r.optBoolean("ok"),
-            r.optBoolean("build"),
-            r.optBoolean("install"),
-            r.optBoolean("test"),
-            r.optBoolean("logcat"),
-            r.optBoolean("screenshot"),
+            r.optBoolean("ok"), r.optBoolean("build"), r.optBoolean("install"), r.optBoolean("test"),
+            r.optBoolean("logcat"), r.optBoolean("screenshot"),
             "Companion Runtime متصل است؛ انتقال تکه‌ای پروژه فعال است."
         )
     }.getOrElse {
@@ -52,11 +48,7 @@ class CompanionBuildRuntime(private val baseUrl: String = "http://127.0.0.1:8787
             require(rel.isNotBlank() && !rel.contains(".."))
             manifest.put(JSONObject().put("path", rel).put("bytes", file.length()))
         }
-        val r = request(
-            "/transfer/start",
-            JSONObject().put("projectName", project.name).put("files", manifest),
-            60_000
-        )
+        val r = request("/transfer/start", JSONObject().put("projectName", project.name).put("files", manifest), 60_000)
         return r.getString("sessionId")
     }
 
@@ -72,7 +64,7 @@ class CompanionBuildRuntime(private val baseUrl: String = "http://127.0.0.1:8787
                 raf.readFully(bytes)
                 var sent = false
                 var lastError: Throwable? = null
-                repeat(3) {
+                for (attempt in 1..3) {
                     try {
                         val payload = JSONObject()
                             .put("sessionId", sessionId)
@@ -84,10 +76,11 @@ class CompanionBuildRuntime(private val baseUrl: String = "http://127.0.0.1:8787
                         require(next == offset + length) { "Runtime returned unexpected file offset." }
                         offset = next
                         sent = true
+                        break
                     } catch (e: Throwable) {
                         lastError = e
+                        if (attempt < 3) Thread.sleep(300L * attempt)
                     }
-                    if (sent) return@repeat
                 }
                 if (!sent) throw IllegalStateException("Chunk transfer failed for $rel at offset $offset: ${lastError?.message}")
             }

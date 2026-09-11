@@ -16,6 +16,7 @@ android {
         versionCode = 1
         versionName = "1.0"
         buildConfigField("String", "AI_API_URL", "\"https://YOUR_BACKEND_URL/v1/chat\"")
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
@@ -42,4 +43,6 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
 }

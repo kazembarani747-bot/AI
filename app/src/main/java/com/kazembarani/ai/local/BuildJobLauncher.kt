@@ -11,11 +11,18 @@ import java.util.UUID
 
 /** Queues a durable foreground build job and survives the UI being closed. */
 object BuildJobLauncher {
-    fun enqueue(context: Context, request: String, budgetMinutes: Int = 30, install: Boolean = false): String {
+    fun enqueue(
+        context: Context,
+        request: String,
+        planJson: String,
+        budgetMinutes: Int = 30,
+        install: Boolean = false
+    ): String {
         val id = UUID.randomUUID().toString()
         val data = Data.Builder()
             .putString(AutonomousBuildWorker.KEY_JOB_ID, id)
             .putString(AutonomousBuildWorker.KEY_REQUEST, request.trim())
+            .putString(AutonomousBuildWorker.KEY_PLAN_JSON, planJson)
             .putInt(AutonomousBuildWorker.KEY_BUDGET, budgetMinutes)
             .putBoolean(AutonomousBuildWorker.KEY_INSTALL, install)
             .build()

@@ -16,7 +16,7 @@ function sendJson(res, status, body) {
     "Cache-Control": "no-store",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   });
   res.end(JSON.stringify(body));
 }
@@ -102,6 +102,17 @@ async function androidProject(message) {
 
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") return sendJson(res, 204, {});
+
+  if (req.method === "GET" && req.url === "/health") {
+    return sendJson(res, 200, {
+      ok: true,
+      service: "ai-backend",
+      model: MODEL,
+      planner: true,
+      message: "AI backend is online."
+    });
+  }
+
   if (req.method !== "POST") return sendJson(res, 404, { error: "Not found" });
 
   try {

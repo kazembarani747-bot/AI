@@ -8,28 +8,41 @@ if (!apiKey) throw new Error("OPENAI_API_KEY is required on the server.");
 
 const client = new OpenAI({ apiKey });
 const MODEL = process.env.OPENAI_MODEL || "gpt-5.6-luna";
+const RUNTIME_URL = (process.env.RUNTIME_URL || "").trim().replace(/\/$/, "");
 const MAX_BODY = 128 * 1024 * 1024;
+const MAX_PROXY_BODY = 4 * 1024 * 1024;
+
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  };
+}
 
 function sendJson(res, status, body) {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    ...corsHeaders(),
   });
   res.end(JSON.stringify(body));
 }
 
-async function readBody(req) {
+async function readBody(req, maxBytes = MAX_BODY) {
   let size = 0;
   const chunks = [];
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > MAX_BODY) throw new Error("request body is too large");
+    if (size > maxBytes) throw new Error("request body is too large");
     chunks.push(chunk);
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+  return Buffer.concat(chunks);
+}
+
+async function readJsonBody(req, maxBytes = MAX_BODY) {
+  const bytes = await readBody(req, maxBytes);
+  return JSON.parse(bytes.toString("utf8") || "{}");
 }
 
 async function normalChat(message) {
@@ -100,23 +113,79 @@ async function androidProject(message) {
   return JSON.parse(response.output_text || "{}");
 }
 
+async function runtimeHealth() {
+  if (!RUNTIME_URL) {
+    return { configured: false, ok: false, build: false, test: false, install: false, logcat: false, screenshot: false };
+  }
+  try {
+    const response = await fetch(`${RUNTIME_URL}/health`, { signal: AbortSignal.timeout(15000) });
+    const body = await response.json();
+    return { configured: true, ...body };
+  } catch (error) {
+    return { configured: true, ok: false, build: false, test: false, install: false, logcat: false, screenshot: false, error: error?.message || "runtime unavailable" };
+  }
+}
+
+async function proxyRuntime(req, res) {
+  if (!RUNTIME_URL) return sendJson(res, 503, { error: "Companion Runtime is not configured." });
+  const allowed = new Set([
+    "/transfer/start", "/transfer/chunk", "/transfer/finalize",
+    "/build-session", "/test-session", "/install", "/logcat", "/screenshot", "/artifact"
+  ]);
+  if (!allowed.has(req.url)) return sendJson(res, 404, { error: "Runtime endpoint not allowed." });
+
+  const body = await readBody(req, MAX_PROXY_BODY);
+  const response = await fetch(`${RUNTIME_URL}${req.url}`, {
+    method: "POST",
+    headers: { "Content-Type": req.headers["content-type"] || "application/json" },
+    body,
+    signal: AbortSignal.timeout(25 * 60 * 1000),
+  });
+  const contentType = response.headers.get("content-type") || "application/octet-stream";
+  const data = Buffer.from(await response.arrayBuffer());
+  res.writeHead(response.status, {
+    "Content-Type": contentType,
+    "Cache-Control": "no-store",
+    ...corsHeaders(),
+  });
+  res.end(data);
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") return sendJson(res, 204, {});
 
   if (req.method === "GET" && req.url === "/health") {
+    const runtime = await runtimeHealth();
     return sendJson(res, 200, {
       ok: true,
       service: "ai-backend",
       model: MODEL,
       planner: true,
-      message: "AI backend is online."
+      runtime: runtime.ok,
+      runtimeConfigured: runtime.configured,
+      runtimeDetails: runtime,
+      message: runtime.ok
+        ? "AI backend and Companion Runtime are online."
+        : "AI backend is online; Companion Runtime is not ready."
     });
+  }
+
+  if (req.method === "POST" && [
+    "/transfer/start", "/transfer/chunk", "/transfer/finalize",
+    "/build-session", "/test-session", "/install", "/logcat", "/screenshot", "/artifact"
+  ].includes(req.url)) {
+    try {
+      return await proxyRuntime(req, res);
+    } catch (error) {
+      console.error(error);
+      return sendJson(res, 502, { error: error?.message || "Companion Runtime request failed" });
+    }
   }
 
   if (req.method !== "POST") return sendJson(res, 404, { error: "Not found" });
 
   try {
-    const body = await readBody(req);
+    const body = await readJsonBody(req);
 
     if (req.url === "/v1/autonomous-plan") {
       const request = typeof body.request === "string" ? body.request.trim() : "";
@@ -130,15 +199,9 @@ const server = http.createServer(async (req, res) => {
     const message = typeof body.message === "string" ? body.message.trim() : "";
     if (!message) return sendJson(res, 400, { error: "message is required" });
 
-    if (req.url === "/v1/chat") {
-      return sendJson(res, 200, { text: await normalChat(message) });
-    }
-    if (req.url === "/v1/code") {
-      return sendJson(res, 200, { text: await codingAssistant(message) });
-    }
-    if (req.url === "/v1/android-project") {
-      return sendJson(res, 200, await androidProject(message));
-    }
+    if (req.url === "/v1/chat") return sendJson(res, 200, { text: await normalChat(message) });
+    if (req.url === "/v1/code") return sendJson(res, 200, { text: await codingAssistant(message) });
+    if (req.url === "/v1/android-project") return sendJson(res, 200, await androidProject(message));
     return sendJson(res, 404, { error: "Not found" });
   } catch (error) {
     console.error(error);
@@ -148,4 +211,5 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(port, "0.0.0.0", () => {
   console.log(`AI backend listening on ${port}`);
+  console.log(`Companion Runtime proxy: ${RUNTIME_URL || "not configured"}`);
 });

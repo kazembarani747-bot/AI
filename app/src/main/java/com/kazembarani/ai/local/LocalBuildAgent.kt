@@ -5,7 +5,7 @@ import android.os.StatFs
 import java.io.File
 
 /** Capability-based on-device build agent; execution is delegated to a trusted runtime adapter. */
-class LocalBuildAgent(private val context: Context) {
+class LocalBuildAgent(val context: Context) {
     data class ToolchainStatus(
         val workspace: File,
         val freeBytes: Long,

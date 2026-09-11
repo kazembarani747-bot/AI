@@ -72,15 +72,16 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
 
     LaunchedEffect(jobId) {
         val id = jobId ?: return@LaunchedEffect
+        val workId = runCatching { UUID.fromString(id) }.getOrNull() ?: return@LaunchedEffect
         val manager = WorkManager.getInstance(agent.context)
         while (true) {
-            val info = withContext(Dispatchers.IO) { manager.getWorkInfoById(id).get() }
+            val info = withContext(Dispatchers.IO) { manager.getWorkInfoById(workId).get() }
             val record = withContext(Dispatchers.IO) { store.load(id) }
-            jobState = record?.state ?: info.state.name
+            jobState = record?.state ?: info?.state?.name.orEmpty()
             jobOutput = record?.output.orEmpty()
             apkPath = record?.apkPath
-            running = !info.state.isFinished
-            if (info.state.isFinished) break
+            running = info?.let { !it.state.isFinished } == true
+            if (info == null || info.state.isFinished) break
             delay(1000)
         }
     }
@@ -91,159 +92,72 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
     ) {
         item {
             Text("ساخت خودکار AI", style = MaterialTheme.typography.headlineSmall)
-            Text("مرحله ۵: اجرای طولانی → بازیابی Job → APK Artifact → Build/Test → Diagnostics → اصلاح خودکار")
+            Text("Pipeline واقعی: Planner → Build → Test → Diagnostics → اصلاح → APK")
         }
-
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("درخواست ساخت", style = MaterialTheme.typography.titleMedium)
-                    OutlinedTextField(
-                        value = prompt,
-                        onValueChange = { prompt = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        minLines = 4,
-                        enabled = !running,
-                        placeholder = { Text("مثلاً: یک اپ یادداشت با جست‌وجو، ذخیره محلی و رابط فارسی بساز") }
-                    )
-
+                    OutlinedTextField(value = prompt, onValueChange = { prompt = it }, modifier = Modifier.fillMaxWidth(), minLines = 4, enabled = !running, placeholder = { Text("مثلاً: یک اپ یادداشت با جست‌وجو، ذخیره محلی و رابط فارسی بساز") })
                     Text("مدت کار خودکار")
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         AutonomousWorkLoop.WorkBudget.values().forEach { option ->
-                            FilterChip(
-                                selected = budget == option,
-                                onClick = { if (!running) budget = option },
-                                label = { Text("${option.minutes} دقیقه") }
-                            )
+                            FilterChip(selected = budget == option, onClick = { if (!running) budget = option }, label = { Text("${option.minutes} دقیقه") })
                         }
                     }
-
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Column(Modifier.weight(1f)) {
-                            Text("نصب APK پس از Build")
-                            Text("پیش‌فرض خاموش است", style = MaterialTheme.typography.bodySmall)
-                        }
+                        Column(Modifier.weight(1f)) { Text("نصب APK پس از Build"); Text("پیش‌فرض خاموش است", style = MaterialTheme.typography.bodySmall) }
                         Switch(checked = install, onCheckedChange = { if (!running) install = it })
                     }
-
-                    if (!backendConfigured) {
-                        Text("🔴 Backend AI تنظیم نشده است. مقدار AI_API_URL را تنظیم کن.", color = MaterialTheme.colorScheme.error)
-                    }
-
+                    if (!backendConfigured) Text("🔴 Backend AI تنظیم نشده است. مقدار AI_API_URL را تنظیم کن.", color = MaterialTheme.colorScheme.error)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            enabled = !running && prompt.isNotBlank() && runtimeStatus?.canBuild == true && backendConfigured,
-                            onClick = {
-                                val id = UUID.randomUUID().toString()
-                                jobId = id
-                                running = true
-                                jobState = "QUEUED"
-                                jobOutput = "در صف اجرای پس‌زمینه قرار گرفت."
-                                apkPath = null
-                                val input = Data.Builder()
-                                    .putString(AutonomousBuildWorker.KEY_JOB_ID, id)
-                                    .putString(AutonomousBuildWorker.KEY_REQUEST, prompt.trim())
-                                    .putInt(AutonomousBuildWorker.KEY_BUDGET, budget.minutes)
-                                    .putBoolean(AutonomousBuildWorker.KEY_INSTALL, install)
-                                    .build()
-                                val request = OneTimeWorkRequestBuilder<AutonomousBuildWorker>()
-                                    .setInputData(input)
-                                    .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-                                    .build()
-                                WorkManager.getInstance(agent.context).enqueueUniqueWork(
-                                    "autonomous-build-$id",
-                                    ExistingWorkPolicy.REPLACE,
-                                    request
-                                )
-                            }
-                        ) { Text(if (running) "در حال کار…" else "شروع ساخت خودکار") }
-
-                        if (running) {
-                            OutlinedButton(onClick = {
-                                jobId?.let { WorkManager.getInstance(agent.context).cancelWorkById(it) }
-                            }) { Text("توقف") }
+                        Button(enabled = !running && prompt.isNotBlank() && runtimeStatus?.canBuild == true && backendConfigured, onClick = {
+                            val id = UUID.randomUUID().toString()
+                            jobId = id; running = true; jobState = "QUEUED"; jobOutput = "در صف اجرای پس‌زمینه قرار گرفت."; apkPath = null
+                            val input = Data.Builder().putString(AutonomousBuildWorker.KEY_JOB_ID, id).putString(AutonomousBuildWorker.KEY_REQUEST, prompt.trim()).putInt(AutonomousBuildWorker.KEY_BUDGET, budget.minutes).putBoolean(AutonomousBuildWorker.KEY_INSTALL, install).build()
+                            val request = OneTimeWorkRequestBuilder<AutonomousBuildWorker>().setInputData(input).setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
+                            WorkManager.getInstance(agent.context).enqueueUniqueWork("autonomous-build-$id", ExistingWorkPolicy.REPLACE, request)
+                        }) { Text(if (running) "در حال کار…" else "شروع ساخت خودکار") }
+                        if (running) OutlinedButton(onClick = { jobId?.let { id -> runCatching { WorkManager.getInstance(agent.context).cancelWorkById(UUID.fromString(id)) } } }) { Text("توقف") }
+                    }
+                }
+            }
+        }
+        if (jobId != null) item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("کار پس‌زمینه", style = MaterialTheme.typography.titleMedium)
+                    Text("شناسه: ${jobId!!.take(8)}…"); Text("وضعیت: $jobState")
+                    if (running) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    if (jobOutput.isNotBlank()) Text(jobOutput.takeLast(6000))
+                    val apk = apkPath?.let(::File)?.takeIf { it.isFile }
+                    if (apk != null) {
+                        Text("📦 APK آماده است: ${apk.name}"); Text("حجم: ${formatBytes(apk.length())}", style = MaterialTheme.typography.bodySmall)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { val uri = FileProvider.getUriForFile(context, "${BuildConfig.APPLICATION_ID}.fileprovider", apk); context.startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri, "application/vnd.android.package-archive"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }) { Text("باز کردن APK") }
+                            OutlinedButton(onClick = { val uri = FileProvider.getUriForFile(context, "${BuildConfig.APPLICATION_ID}.fileprovider", apk); context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "application/vnd.android.package-archive"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }, "اشتراک APK")) }) { Text("اشتراک") }
                         }
                     }
                 }
             }
         }
-
-        if (jobId != null) {
-            item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("کار پس‌زمینه", style = MaterialTheme.typography.titleMedium)
-                        Text("شناسه: ${jobId!!.take(8)}…")
-                        Text("وضعیت: $jobState")
-                        if (running) LinearProgressIndicator(Modifier.fillMaxWidth())
-                        if (jobOutput.isNotBlank()) Text(jobOutput.takeLast(6000))
-
-                        val apk = apkPath?.let(::File)?.takeIf { it.isFile }
-                        if (apk != null) {
-                            Text("📦 APK آماده است: ${apk.name}")
-                            Text("حجم: ${formatBytes(apk.length())}", style = MaterialTheme.typography.bodySmall)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = {
-                                    val uri = FileProvider.getUriForFile(context, "${BuildConfig.APPLICATION_ID}.fileprovider", apk)
-                                    context.startActivity(
-                                        Intent(Intent.ACTION_VIEW).apply {
-                                            setDataAndType(uri, "application/vnd.android.package-archive")
-                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                        }
-                                    )
-                                }) { Text("باز کردن APK") }
-                                OutlinedButton(onClick = {
-                                    val uri = FileProvider.getUriForFile(context, "${BuildConfig.APPLICATION_ID}.fileprovider", apk)
-                                    context.startActivity(
-                                        Intent.createChooser(
-                                            Intent(Intent.ACTION_SEND).apply {
-                                                type = "application/vnd.android.package-archive"
-                                                putExtra(Intent.EXTRA_STREAM, uri)
-                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                            },
-                                            "اشتراک APK"
-                                        )
-                                    )
-                                }) { Text("اشتراک") }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("وضعیت Runtime", style = MaterialTheme.typography.titleMedium)
                     val r = runtimeStatus
                     Text(if (r?.available == true) "🟢 Runtime متصل" else "🔴 Runtime متصل نیست")
-                    if (r != null) {
-                        Text(r.note)
-                        Text("Build: ${r.canBuild} | Test: ${r.canTest} | Install: ${r.canInstall}")
-                        Text("Logcat: ${r.canCaptureLogs} | Screenshot: ${r.canCaptureScreenshots}")
-                    }
+                    if (r != null) { Text(r.note); Text("Build: ${r.canBuild} | Test: ${r.canTest} | Install: ${r.canInstall}"); Text("Logcat: ${r.canCaptureLogs} | Screenshot: ${r.canCaptureScreenshots}") }
                 }
             }
         }
-
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("وضعیت محیط محلی", style = MaterialTheme.typography.titleMedium)
                     when (val current = state) {
-                        BuildManagerState.Idle, BuildManagerState.Inspecting -> {
-                            LinearProgressIndicator(Modifier.fillMaxWidth())
-                            Text("در حال بررسی ابزارها…")
-                        }
-                        is BuildManagerState.Ready -> {
-                            ToolRow("JDK", current.status.hasJdk)
-                            ToolRow("Android SDK", current.status.hasAndroidSdk)
-                            ToolRow("Gradle", current.status.hasGradle)
-                            ToolRow("ADB", current.status.hasAdb)
-                            Text("فضای آزاد: ${formatBytes(current.status.freeBytes)}")
-                            Text(current.status.note)
-                        }
+                        BuildManagerState.Idle, BuildManagerState.Inspecting -> { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("در حال بررسی ابزارها…") }
+                        is BuildManagerState.Ready -> { ToolRow("JDK", current.status.hasJdk); ToolRow("Android SDK", current.status.hasAndroidSdk); ToolRow("Gradle", current.status.hasGradle); ToolRow("ADB", current.status.hasAdb); Text("فضای آزاد: ${formatBytes(current.status.freeBytes)}"); Text(current.status.note) }
                         BuildManagerState.Preparing -> Text("در حال آماده‌سازی…")
                         is BuildManagerState.Building -> Text("در حال Build: ${current.project.name}")
                         is BuildManagerState.Testing -> Text("در حال تست: ${current.project.name}")
@@ -253,22 +167,9 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
                 }
             }
         }
-
-        item {
-            Button(
-                onClick = { scope.launch { refresh() } },
-                enabled = !running && state !is BuildManagerState.Inspecting
-            ) { Text("بررسی Runtime و ابزارها") }
-        }
+        item { Button(onClick = { scope.launch { refresh() } }, enabled = !running && state !is BuildManagerState.Inspecting) { Text("بررسی Runtime و ابزارها") } }
     }
 }
 
-@Composable private fun ToolRow(name: String, installed: Boolean) {
-    Text(if (installed) "✅ $name" else "⬜ $name — آماده نیست")
-}
-
-private fun formatBytes(bytes: Long): String = when {
-    bytes >= 1024L * 1024 * 1024 -> "%.1f GB".format(bytes / (1024.0 * 1024 * 1024))
-    bytes >= 1024L * 1024 -> "%.0f MB".format(bytes / (1024.0 * 1024))
-    else -> "$bytes B"
-}
+@Composable private fun ToolRow(name: String, installed: Boolean) { Text(if (installed) "✅ $name" else "⬜ $name — آماده نیست") }
+private fun formatBytes(bytes: Long): String = when { bytes >= 1024L * 1024 * 1024 -> "%.1f GB".format(bytes / (1024.0 * 1024 * 1024)); bytes >= 1024L * 1024 -> "%.0f MB".format(bytes / (1024.0 * 1024)); else -> "$bytes B" }

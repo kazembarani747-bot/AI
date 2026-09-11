@@ -9,25 +9,28 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import java.util.UUID
 
-/** Queues a durable foreground build job and survives the UI being closed. */
+/** Queues a durable foreground build job. The returned job ID is also the WorkManager ID. */
 object BuildJobLauncher {
     fun enqueue(
         context: Context,
         request: String,
-        planJson: String,
+        planJson: String = "",
         budgetMinutes: Int = 30,
         install: Boolean = false
     ): String {
-        val id = UUID.randomUUID().toString()
+        val id = UUID.randomUUID()
         val data = Data.Builder()
-            .putString(AutonomousBuildWorker.KEY_JOB_ID, id)
+            .putString(AutonomousBuildWorker.KEY_JOB_ID, id.toString())
             .putString(AutonomousBuildWorker.KEY_REQUEST, request.trim())
             .putString(AutonomousBuildWorker.KEY_PLAN_JSON, planJson)
-            .putInt(AutonomousBuildWorker.KEY_BUDGET, budgetMinutes)
+            .putInt(AutonomousBuildWorker.KEY_BUDGET, budgetMinutes.coerceIn(10, 60))
             .putBoolean(AutonomousBuildWorker.KEY_INSTALL, install)
             .build()
-        val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
         val work = OneTimeWorkRequestBuilder<AutonomousBuildWorker>()
+            .setId(id)
             .setInputData(data)
             .setConstraints(constraints)
             .addTag(TAG)
@@ -35,7 +38,7 @@ object BuildJobLauncher {
         WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
             "ai-build-$id", ExistingWorkPolicy.REPLACE, work
         )
-        return id
+        return id.toString()
     }
 
     const val TAG = "ai-autonomous-build"

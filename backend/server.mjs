@@ -1,12 +1,13 @@
 import http from "node:http";
 import OpenAI from "openai";
+import { nextPlan } from "./autonomous-loop.mjs";
 
 const port = Number(process.env.PORT || 8787);
 const apiKey = process.env.OPENAI_API_KEY;
 if (!apiKey) throw new Error("OPENAI_API_KEY is required on the server.");
 
 const client = new OpenAI({ apiKey });
-const MODEL = "gpt-5.6-luna";
+const MODEL = process.env.OPENAI_MODEL || "gpt-5.6-luna";
 
 function sendJson(res, status, body) {
   res.writeHead(status, {
@@ -99,6 +100,15 @@ const server = http.createServer(async (req, res) => {
 
   try {
     const body = await readBody(req);
+
+    if (req.url === "/v1/autonomous-plan") {
+      const request = typeof body.request === "string" ? body.request.trim() : "";
+      const feedback = typeof body.feedback === "string" ? body.feedback.trim() : null;
+      if (!request) return sendJson(res, 400, { error: "request is required" });
+      const plan = await nextPlan({ request, feedback });
+      return sendJson(res, 200, { plan });
+    }
+
     const message = typeof body.message === "string" ? body.message.trim() : "";
     if (!message) return sendJson(res, 400, { error: "message is required" });
 

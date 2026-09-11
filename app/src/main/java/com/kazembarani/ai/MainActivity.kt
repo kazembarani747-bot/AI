@@ -1,21 +1,17 @@
 package com.kazembarani.ai
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -24,61 +20,38 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.Create
-import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Send
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kazembarani.ai.local.ApiKeyStore
-import com.kazembarani.ai.local.BuildJobLauncher
-import com.kazembarani.ai.local.LocalBuildAgent
-import com.kazembarani.ai.local.LocalBuildManagerScreen
-import com.kazembarani.ai.local.OpenAiClient
 import kotlinx.coroutines.launch
 
-private data class Message(val text: String, val fromUser: Boolean)
-private enum class AiMode(val title: String, val subtitle: String) {
-    CHAT("گفت‌وگو", "چت هوشمند و خلاق"), CODE("کدنویسی", "نوشتن، توضیح و رفع خطا"), ANDROID("ساخت اپ", "ایده → پروژه Android → APK"), LOCAL_BUILD("استودیو ساخت", "فایل‌ها، Build، Test و خروجی")
-}
-
-private val Blue = Color(0xFF1769E0)
+private val Blue = Color(0xFF1677FF)
 private val BlueLight = Color(0xFFEAF3FF)
-private val Ink = Color(0xFF111827)
-private val Soft = Color(0xFFF7F9FC)
+private val Ink = Color(0xFF101828)
+
+private enum class AiMode(val title: String, val subtitle: String) {
+    CHAT("چت", "دستیار هوشمند"), CODE("کدنویسی", "تولید و اصلاح کد"), ANDROID("ساخت اپ", "تبدیل ایده به APK"), LOCAL_BUILD("استودیو ساخت", "Build و Test واقعی")
+}
+private data class Message(val text: String, val mine: Boolean)
 
 class MainActivity : ComponentActivity() {
-    private val notificationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        setContent { AppTheme { AiApp() } }
+        setContent { MaterialTheme(colorScheme = lightColorScheme(primary = Blue, background = Color.White, surface = Color.White, onBackground = Ink, onSurface = Ink)) { StudioApp() } }
     }
 }
 
-@Composable private fun AppTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = lightColorScheme(primary = Blue, onPrimary = Color.White, primaryContainer = BlueLight, onPrimaryContainer = Ink, secondary = Color(0xFF4D7CC7), background = Color.White, surface = Color.White, surfaceVariant = Soft, onBackground = Ink, onSurface = Ink, onSurfaceVariant = Color(0xFF536174)), typography = Typography(), content = content)
-}
-
-@Composable private fun AiApp() {
-    CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides LayoutDirection.Rtl) {
-        val context = androidx.compose.ui.platform.LocalContext.current
+@Composable private fun StudioApp() {
+    CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides androidx.compose.ui.unit.LayoutDirection.Rtl) {
+        val context = LocalContext.current
         val scope = rememberCoroutineScope()
         var input by remember { mutableStateOf("") }
         var messages by remember { mutableStateOf(emptyList<Message>()) }
@@ -91,7 +64,7 @@ class MainActivity : ComponentActivity() {
         var webMode by remember { mutableStateOf(false) }
         val agent = remember(context) { LocalBuildAgent(context.applicationContext) }
 
-        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Box(Modifier.fillMaxSize().background(Color.White)) {
             AnimatedContent(targetState = mode, label = "mode") { selected ->
                 if (selected == AiMode.LOCAL_BUILD) {
                     Scaffold(topBar = { TopAppBar(title = { Column { Text("استودیو ساخت", fontWeight = FontWeight.Bold); Text("محیط کامل پروژه", fontSize = 11.sp) } }, navigationIcon = { IconButton(onClick = { drawer = true }) { Icon(Icons.Default.Menu, "منو") } }) }) { padding -> Box(Modifier.fillMaxSize().padding(padding)) { LocalBuildManagerScreen(agent) } }
@@ -182,13 +155,15 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable private fun MessageBubble(message: Message) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.fromUser) Arrangement.Start else Arrangement.End) {
-        Surface(shape = RoundedCornerShape(20.dp), color = if (message.fromUser) BlueLight else Soft, tonalElevation = 1.dp, modifier = Modifier.widthIn(max = 340.dp)) { Text(message.text, Modifier.padding(horizontal = 16.dp, vertical = 12.dp), color = Ink, lineHeight = 22.sp) }
+@Composable private fun MessageBubble(msg: Message) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (msg.mine) Arrangement.End else Arrangement.Start) {
+        Surface(shape = RoundedCornerShape(20.dp), color = if (msg.mine) BlueLight else Color(0xFFF5F7FA), tonalElevation = 1.dp, modifier = Modifier.widthIn(max = 340.dp)) { Text(msg.text, Modifier.padding(horizontal = 16.dp, vertical = 12.dp), color = Ink) }
     }
 }
 
 @Composable private fun ApiKeyDialog(context: android.content.Context, onDismiss: () -> Unit) {
-    var key by remember { mutableStateOf("") }; var testing by remember { mutableStateOf(false) }; var status by remember { mutableStateOf("") }; val scope = rememberCoroutineScope()
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("کلید OpenAI") }, text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("کلید فقط روی همین دستگاه ذخیره می‌شود. آن را داخل چت یا GitHub قرار نده.", fontSize = 13.sp); OutlinedTextField(value = key, onValueChange = { key = it }, singleLine = true, label = { Text("API key") }, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()); if (status.isNotBlank()) Text(status, fontSize = 12.sp) } }, confirmButton = { Button(enabled = key.isNotBlank() && !testing, onClick = { testing = true; status = "در حال بررسی…"; scope.launch { try { ApiKeyStore.save(context, key.trim()); OpenAiClient(context).testKey(); status = "✅ کلید معتبر است."; key = ""; testing = false; onDismiss() } catch (e: Exception) { ApiKeyStore.clear(context); status = "❌ ${e.message ?: "کلید نامعتبر است."}"; testing = false } } }) { Text(if (testing) "بررسی…" else "ذخیره و بررسی") } }, dismissButton = { TextButton(onClick = { ApiKeyStore.clear(context); key = ""; status = "کلید حذف شد." }) { Text("حذف کلید") } })
+    var key by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("کلید OpenAI") }, text = { Column { Text("کلید فقط روی همین دستگاه به‌صورت رمزگذاری‌شده ذخیره می‌شود.", fontSize = 13.sp); Spacer(Modifier.height(12.dp)); OutlinedTextField(value = key, onValueChange = { key = it; error = null }, singleLine = true, label = { Text("API key") }); if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp)) } }, confirmButton = { TextButton(enabled = key.isNotBlank() && !busy, onClick = { busy = true; try { ApiKeyStore.save(context, key.trim()); error = null; onDismiss() } catch (e: Exception) { error = e.message ?: "ذخیره کلید ناموفق بود." } finally { busy = false } }) { Text(if (busy) "در حال ذخیره…" else "ذخیره") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } })
 }

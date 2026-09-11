@@ -1,14 +1,18 @@
 package com.kazembarani.ai.local
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
+import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
+import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.kazembarani.ai.BuildConfig
 import kotlinx.coroutines.CancellationException
-import org.json.JSONObject
+import java.io.File
 import java.util.UUID
 
-/** Runs the autonomous build loop as durable Android background work. */
+/** Runs the autonomous build loop as durable foreground Android work. */
 class AutonomousBuildWorker(
     appContext: Context,
     params: WorkerParameters
@@ -22,7 +26,7 @@ class AutonomousBuildWorker(
             ?: AutonomousWorkLoop.WorkBudget.MINUTES_10
         val store = AutonomousJobStore(applicationContext)
 
-        fun save(state: String, output: String) {
+        fun save(state: String, output: String, apkPath: String? = store.load(jobId)?.apkPath) {
             store.save(
                 AutonomousJobStore.Record(
                     id = jobId,
@@ -31,6 +35,7 @@ class AutonomousBuildWorker(
                     install = install,
                     state = state,
                     output = output,
+                    apkPath = apkPath,
                     updatedAt = System.currentTimeMillis()
                 )
             )
@@ -41,6 +46,7 @@ class AutonomousBuildWorker(
             return Result.failure()
         }
 
+        setForeground(createForegroundInfo(jobId, "ساخت خودکار AI در حال اجراست…"))
         save("RUNNING", "کار خودکار در پس‌زمینه شروع شد.")
         return try {
             val agent = LocalBuildAgent(applicationContext)
@@ -54,13 +60,17 @@ class AutonomousBuildWorker(
                 budget = budget,
                 install = install,
                 onProgress = { progress ->
+                    val apk = findLatestApk(agent.workspace)
                     save(
                         if (progress.success) "${progress.stage}_OK" else "${progress.stage}_FAILED",
-                        progress.output
+                        progress.output,
+                        apk?.absolutePath
                     )
+                    setForeground(createForegroundInfo(jobId, "${progress.stage}: ${if (progress.success) "موفق" else "در حال اصلاح"}"))
                 }
             )
-            save(if (result.success) "SUCCEEDED" else "FAILED", result.finalOutput)
+            val apk = findLatestApk(agent.workspace)
+            save(if (result.success) "SUCCEEDED" else "FAILED", result.finalOutput, apk?.absolutePath)
             if (result.success) Result.success() else Result.failure()
         } catch (e: CancellationException) {
             save("CANCELLED", "کار خودکار لغو شد.")
@@ -71,10 +81,35 @@ class AutonomousBuildWorker(
         }
     }
 
+    private fun createForegroundInfo(jobId: String, text: String): ForegroundInfo {
+        val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, "AI Builder", NotificationManager.IMPORTANCE_LOW)
+        )
+        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle("AI Builder")
+            .setContentText(text)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .build()
+        return ForegroundInfo(NOTIFICATION_ID, notification)
+    }
+
+    private fun findLatestApk(workspace: File): File? = runCatching {
+        workspace.walkTopDown()
+            .filter { it.isFile && it.name.endsWith(".apk") }
+            .maxByOrNull { it.lastModified() }
+            ?.takeIf { it.length() > 0L }
+    }.getOrNull()
+
     companion object {
         const val KEY_JOB_ID = "job_id"
         const val KEY_REQUEST = "request"
         const val KEY_BUDGET = "budget_minutes"
         const val KEY_INSTALL = "install"
+        private const val CHANNEL_ID = "ai_builder_foreground"
+        private const val NOTIFICATION_ID = 4705
     }
 }

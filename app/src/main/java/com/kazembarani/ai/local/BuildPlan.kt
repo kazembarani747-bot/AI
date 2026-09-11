@@ -11,6 +11,21 @@ data class BuildPlan(
     val buildTasks: List<String> = listOf("assembleDebug"),
     val testTasks: List<String> = emptyList()
 ) {
+    fun validate() {
+        require(Regex("^[A-Za-z0-9._-]{1,80}$").matches(projectName)) { "نام پروژه نامعتبر است." }
+        require(files.isNotEmpty() && files.size <= 2000) { "تعداد فایل‌های پروژه نامعتبر است." }
+        files.forEach { (path, content) ->
+            require(path.isNotBlank() && !path.startsWith("/") && !path.contains("..")) { "مسیر فایل نامعتبر است: $path" }
+            require(content.length <= 2_000_000) { "فایل بیش از حد بزرگ است: $path" }
+        }
+        validateTasks(buildTasks, "buildTasks")
+        validateTasks(testTasks, "testTasks")
+    }
+
+    private fun validateTasks(tasks: List<String>, name: String) {
+        require(tasks.size <= 16 && tasks.all { Regex("^[A-Za-z0-9:_-]{1,80}$").matches(it) }) { "$name نامعتبر است." }
+    }
+
     fun toJson(): JSONObject = JSONObject().apply {
         put("projectName", projectName)
         put("summary", summary)
@@ -27,7 +42,6 @@ data class BuildPlan(
                     filesObject.keys().forEach { key -> put(key, filesObject.optString(key)) }
                 }
             } else {
-                // /v1/android-project currently returns files as [{path, content}, ...].
                 val filesArray = json.optJSONArray("files") ?: JSONArray()
                 buildMap {
                     for (i in 0 until filesArray.length()) {

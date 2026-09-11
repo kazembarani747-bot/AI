@@ -3,6 +3,7 @@ package com.kazembarani.ai.local
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.ServiceInfo
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
@@ -94,7 +95,17 @@ class AutonomousBuildWorker(
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .build()
-        return ForegroundInfo(NOTIFICATION_ID, notification)
+
+        // Stage 6: explicitly declare the data-sync foreground-service type on Android 10+.
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            ForegroundInfo(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            ForegroundInfo(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun findLatestApk(workspace: File): File? = runCatching {

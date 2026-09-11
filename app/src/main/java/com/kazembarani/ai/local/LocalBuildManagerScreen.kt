@@ -15,6 +15,7 @@ import androidx.work.WorkManager
 import com.kazembarani.ai.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
@@ -30,6 +31,7 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
     var jobId by remember { mutableStateOf<String?>(null) }
     var jobState by remember { mutableStateOf("") }
     var jobOutput by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
     val backendUrl = remember(BuildConfig.AI_API_URL) {
         BuildConfig.AI_API_URL.substringBeforeLast("/v1/chat").trimEnd('/')
     }
@@ -50,7 +52,7 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
         val id = jobId ?: return@LaunchedEffect
         val manager = WorkManager.getInstance(agent.context)
         while (true) {
-            val info = manager.getWorkInfoById(id).get()
+            val info = withContext(Dispatchers.IO) { manager.getWorkInfoById(id).get() }
             val record = withContext(Dispatchers.IO) { AutonomousJobStore(agent.context).load(id) }
             jobState = record?.state ?: info.state.name
             jobOutput = record?.output.orEmpty()
@@ -200,7 +202,7 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
 
         item {
             Button(
-                onClick = { kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch { refresh() } },
+                onClick = { scope.launch { refresh() } },
                 enabled = !running && state !is BuildManagerState.Inspecting
             ) { Text("بررسی Runtime و ابزارها") }
         }

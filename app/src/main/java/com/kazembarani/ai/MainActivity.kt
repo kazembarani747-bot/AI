@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.runtime.CompositionLocalProvider
+import com.kazembarani.ai.local.BackendSettings
 import com.kazembarani.ai.local.LocalBuildAgent
 import com.kazembarani.ai.local.LocalBuildManagerScreen
 import kotlinx.coroutines.Dispatchers
@@ -41,21 +42,8 @@ private enum class AiMode(val title: String, val path: String) {
 
 private val httpClient = OkHttpClient()
 private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
-private const val PREFS = "ai_settings"
-private const val BACKEND_URL_KEY = "backend_url"
-private const val DEFAULT_BACKEND = "https://YOUR_BACKEND_URL"
 
-private fun cleanBackendUrl(value: String): String {
-    var url = value.trim().trimEnd('/')
-    url = url.removeSuffix("/v1/chat").trimEnd('/')
-    return url
-}
-
-private fun savedBackendUrl(context: Context): String =
-    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        .getString(BACKEND_URL_KEY, BuildConfig.AI_API_URL.substringBeforeLast("/v1/chat"))
-        ?.let(::cleanBackendUrl)
-        .orEmpty()
+private fun savedBackendUrl(context: Context): String = BackendSettings.saved(context)
 
 class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
@@ -225,7 +213,7 @@ private fun ServerSettingsDialog(context: Context, onDismiss: () -> Unit) {
                 TextButton(
                     enabled = !checking && url.isNotBlank(),
                     onClick = {
-                        val clean = cleanBackendUrl(url)
+                        val clean = BackendSettings.clean(url)
                         if (!clean.startsWith("https://")) {
                             status = "آدرس باید با https:// شروع شود."
                             return@TextButton
@@ -249,13 +237,12 @@ private fun ServerSettingsDialog(context: Context, onDismiss: () -> Unit) {
                 Button(
                     enabled = url.isNotBlank(),
                     onClick = {
-                        val clean = cleanBackendUrl(url)
+                        val clean = BackendSettings.clean(url)
                         if (!clean.startsWith("https://")) {
                             status = "آدرس باید با https:// شروع شود."
                             return@Button
                         }
-                        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                            .edit().putString(BACKEND_URL_KEY, clean).apply()
+                        BackendSettings.save(context, clean)
                         onDismiss()
                     }
                 ) { Text("ذخیره") }

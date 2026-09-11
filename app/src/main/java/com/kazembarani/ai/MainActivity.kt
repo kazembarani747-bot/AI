@@ -1,6 +1,7 @@
 package com.kazembarani.ai
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -40,6 +41,21 @@ private enum class AiMode(val title: String, val path: String) {
 
 private val httpClient = OkHttpClient()
 private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+private const val PREFS = "ai_settings"
+private const val BACKEND_URL_KEY = "backend_url"
+private const val DEFAULT_BACKEND = "https://YOUR_BACKEND_URL"
+
+private fun cleanBackendUrl(value: String): String {
+    var url = value.trim().trimEnd('/')
+    url = url.removeSuffix("/v1/chat").trimEnd('/')
+    return url
+}
+
+private fun savedBackendUrl(context: Context): String =
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .getString(BACKEND_URL_KEY, BuildConfig.AI_API_URL.substringBeforeLast("/v1/chat"))
+        ?.let(::cleanBackendUrl)
+        .orEmpty()
 
 class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
@@ -56,11 +72,14 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private suspend fun askAi(message: String, mode: AiMode): String = withContext(Dispatchers.IO) {
-    if (BuildConfig.AI_API_URL.contains("YOUR_BACKEND_URL")) {
-        return@withContext "اتصال سرور هنوز تنظیم نشده است. بک‌اند امن برنامه باید روی یک آدرس واقعی قرار بگیرد."
+private suspend fun askAi(context: Context, message: String, mode: AiMode): String = withContext(Dispatchers.IO) {
+    val baseUrl = savedBackendUrl(context)
+    if (baseUrl.isBlank() || baseUrl.contains("YOUR_BACKEND_URL")) {
+        return@withContext "اول آدرس بک‌اند را از منوی برنامه → تنظیم سرور وارد کن."
     }
-    val baseUrl = BuildConfig.AI_API_URL.substringBeforeLast("/v1/chat")
+    if (!baseUrl.startsWith("https://")) {
+        return@withContext "برای امنیت، آدرس بک‌اند باید با https:// شروع شود."
+    }
     val url = baseUrl + mode.path
     val payload = JSONObject().put("message", message).toString()
     val request = Request.Builder().url(url).post(payload.toRequestBody(jsonMediaType)).build()
@@ -78,7 +97,7 @@ private suspend fun askAi(message: String, mode: AiMode): String = withContext(D
             json.optString("text", "پاسخی دریافت نشد.")
         }
     } catch (e: Exception) {
-        "ارتباط با سرور برقرار نشد. اینترنت و آدرس بک‌اند را بررسی کن."
+        "ارتباط با بک‌اند برقرار نشد. آدرس سرور و اینترنت را بررسی کن."
     }
 }
 
@@ -89,6 +108,7 @@ private fun AiApp() {
         var input by remember { mutableStateOf("") }
         var messages by remember { mutableStateOf(listOf<Message>()) }
         var showInfo by remember { mutableStateOf(false) }
+        var showServerSettings by remember { mutableStateOf(false) }
         var loading by remember { mutableStateOf(false) }
         var mode by remember { mutableStateOf(AiMode.CHAT) }
         val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -108,6 +128,11 @@ private fun AiApp() {
                             modifier = Modifier.padding(horizontal = 12.dp)
                         )
                     }
+                    NavigationDrawerItem(
+                        label = { Text("تنظیم سرور") }, selected = false,
+                        onClick = { showServerSettings = true; scope.launch { drawerState.close() } },
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    )
                     NavigationDrawerItem(
                         label = { Text("گفت‌وگوی جدید") }, selected = false,
                         onClick = { messages = emptyList(); scope.launch { drawerState.close() } },
@@ -144,7 +169,7 @@ private fun AiApp() {
                             input = ""
                             loading = true
                             scope.launch {
-                                messages = messages + Message(askAi(text, mode), false)
+                                messages = messages + Message(askAi(context, text, mode), false)
                                 loading = false
                             }
                         }
@@ -152,6 +177,13 @@ private fun AiApp() {
                     onMenu = { scope.launch { drawerState.open() } }
                 )
             }
+        }
+
+        if (showServerSettings) {
+            ServerSettingsDialog(
+                context = context,
+                onDismiss = { showServerSettings = false }
+            )
         }
 
         if (showInfo) {
@@ -163,6 +195,73 @@ private fun AiApp() {
             )
         }
     }
+}
+
+@Composable
+private fun ServerSettingsDialog(context: Context, onDismiss: () -> Unit) {
+    var url by remember { mutableStateOf(savedBackendUrl(context).takeUnless { it.contains("YOUR_BACKEND_URL") }.orEmpty()) }
+    var status by remember { mutableStateOf("") }
+    var checking by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("تنظیم سرور AI") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("آدرس HTTPS بک‌اند را وارد کن. فقط یک‌بار لازم است؛ برنامه آن را ذخیره می‌کند.")
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    singleLine = true,
+                    placeholder = { Text("https://example.onrender.com") }
+                )
+                if (status.isNotBlank()) Text(status, fontSize = 13.sp)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("لغو") } },
+        confirmButton = {
+            Row {
+                TextButton(
+                    enabled = !checking && url.isNotBlank(),
+                    onClick = {
+                        val clean = cleanBackendUrl(url)
+                        if (!clean.startsWith("https://")) {
+                            status = "آدرس باید با https:// شروع شود."
+                            return@TextButton
+                        }
+                        checking = true
+                        status = "در حال بررسی…"
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    val request = Request.Builder().url("$clean/health").get().build()
+                                    httpClient.newCall(request).execute().use { response ->
+                                        response.isSuccessful && JSONObject(response.body?.string().orEmpty()).optBoolean("ok")
+                                    }
+                                }.getOrDefault(false)
+                            }
+                            checking = false
+                            status = if (result) "✅ سرور آنلاین است." else "❌ سرور پاسخ نداد."
+                        }
+                    }
+                ) { Text("بررسی") }
+                Button(
+                    enabled = url.isNotBlank(),
+                    onClick = {
+                        val clean = cleanBackendUrl(url)
+                        if (!clean.startsWith("https://")) {
+                            status = "آدرس باید با https:// شروع شود."
+                            return@Button
+                        }
+                        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                            .edit().putString(BACKEND_URL_KEY, clean).apply()
+                        onDismiss()
+                    }
+                ) { Text("ذخیره") }
+            }
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

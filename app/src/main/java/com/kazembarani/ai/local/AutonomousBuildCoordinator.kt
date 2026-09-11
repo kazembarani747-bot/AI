@@ -32,10 +32,11 @@ class AutonomousBuildCoordinator(
     ): AutonomousWorkLoop.Result {
         val cleanRequest = request.trim()
         require(cleanRequest.isNotEmpty()) { "درخواست ساخت خالی است." }
+        require(isValidBackendUrl(backendUrl)) { "آدرس Backend تنظیم نشده یا معتبر نیست." }
 
         val loop = AutonomousWorkLoop(agent, runtime)
         return loop.run(
-            planProvider = { feedback -> requestPlan(cleanRequest, feedback) },
+            planProvider = { feedback -> requestPlan(cleanRequest, feedback, budget) },
             budget = budget,
             install = install,
             maxAttempts = maxAttempts,
@@ -45,10 +46,15 @@ class AutonomousBuildCoordinator(
         )
     }
 
-    private suspend fun requestPlan(request: String, feedback: String?): BuildPlan = withContext(Dispatchers.IO) {
+    private suspend fun requestPlan(
+        request: String,
+        feedback: String?,
+        budget: AutonomousWorkLoop.WorkBudget
+    ): BuildPlan = withContext(Dispatchers.IO) {
         val payload = JSONObject()
             .put("request", request)
-            .apply { if (!feedback.isNullOrBlank()) put("feedback", feedback) }
+            .put("budget", budget.minutes)
+            .apply { if (!feedback.isNullOrBlank()) put("feedback", feedback.takeLast(12_000)) }
             .toString()
 
         val url = backendUrl.trimEnd('/') + "/v1/autonomous-plan"
@@ -61,11 +67,11 @@ class AutonomousBuildCoordinator(
             httpClient.newCall(httpRequest).execute().use { response ->
                 val body = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
-                    throw IllegalStateException("Planner HTTP ${response.code}: ${body.take(2000)}")
+                    throw IllegalStateException("Planner HTTP ${response.code}: ${body.take(3000)}")
                 }
                 val json = JSONObject(body)
-                val planJson = json.optJSONObject("plan") ?: json
-                return@withContext BuildPlan.fromJson(planJson)
+                val planJson = json.optJSONObject("plan") ?: throw IllegalStateException("Planner پاسخ بدون plan برگرداند.")
+                return@withContext BuildPlan.fromJson(planJson).also { it.validate() }
             }
         } catch (e: CancellationException) {
             throw e
@@ -76,5 +82,10 @@ class AutonomousBuildCoordinator(
 
     companion object {
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+
+        private fun isValidBackendUrl(value: String): Boolean {
+            return value.isNotBlank() && !value.contains("YOUR_BACKEND_URL") &&
+                (value.startsWith("http://") || value.startsWith("https://"))
+        }
     }
 }

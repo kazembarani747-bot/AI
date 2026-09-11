@@ -8,7 +8,6 @@ import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
-import com.kazembarani.ai.BuildConfig
 import kotlinx.coroutines.CancellationException
 import java.io.File
 import java.util.UUID
@@ -47,14 +46,20 @@ class AutonomousBuildWorker(
             return Result.failure()
         }
 
+        val backendUrl = BackendSettings.saved(applicationContext)
+        if (backendUrl.isBlank() || backendUrl.contains("YOUR_BACKEND_URL") || !backendUrl.startsWith("https://")) {
+            save("FAILED", "آدرس HTTPS بک‌اند تنظیم نشده است. از منوی برنامه → تنظیم سرور آن را ذخیره کن.")
+            return Result.failure()
+        }
+
         setForeground(createForegroundInfo(jobId, "ساخت خودکار AI در حال اجراست…"))
         save("RUNNING", "کار خودکار در پس‌زمینه شروع شد.")
         return try {
             val agent = LocalBuildAgent(applicationContext)
             val coordinator = AutonomousBuildCoordinator(
                 agent = agent,
-                runtime = CompanionBuildRuntime(),
-                backendUrl = BuildConfig.AI_API_URL.substringBeforeLast("/v1/chat").trimEnd('/')
+                runtime = CompanionBuildRuntime(backendUrl),
+                backendUrl = backendUrl
             )
             val result = coordinator.run(
                 request = request,
@@ -96,13 +101,8 @@ class AutonomousBuildWorker(
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .build()
 
-        // Stage 6: explicitly declare the data-sync foreground-service type on Android 10+.
         return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            ForegroundInfo(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            )
+            ForegroundInfo(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
             ForegroundInfo(NOTIFICATION_ID, notification)
         }

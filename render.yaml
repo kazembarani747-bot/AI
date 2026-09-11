@@ -13,3 +13,19 @@ services:
         value: gpt-5.6-luna
       - key: RUNTIME_URL
         sync: false
+      - key: RUNTIME_TOKEN
+        sync: false
+
+  - type: web
+    name: ai-companion-runtime
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile.runtime
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: RUNTIME_TOKEN
+        sync: false
+      - key: RUNTIME_HOST
+        value: 0.0.0.0
+      - key: RUNTIME_PORT
+        value: 8787

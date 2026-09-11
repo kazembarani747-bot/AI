@@ -1,0 +1,26 @@
+name: Companion Runtime Validation
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node syntax check
+        run: |
+          node --check backend/server.mjs
+          node --check backend/autonomous-loop.mjs
+          node --check backend/companion-runtime.mjs
+
+      - name: Build runtime container
+        run: docker build -f backend/Dockerfile.runtime -t ai-companion-runtime:ci .

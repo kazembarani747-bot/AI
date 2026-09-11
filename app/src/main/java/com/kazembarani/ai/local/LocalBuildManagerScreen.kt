@@ -1,11 +1,14 @@
 package com.kazembarani.ai.local
 
+import android.content.Intent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.work.Constraints
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
@@ -17,10 +20,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.UUID
 
 @Composable
 fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = CompanionBuildRuntime()) {
+    val context = LocalContext.current
     var state by remember { mutableStateOf<BuildManagerState>(BuildManagerState.Idle) }
     var status by remember { mutableStateOf<LocalBuildAgent.ToolchainStatus?>(null) }
     var runtimeStatus by remember { mutableStateOf<BuildRuntime.Capabilities?>(null) }
@@ -31,13 +36,27 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
     var jobId by remember { mutableStateOf<String?>(null) }
     var jobState by remember { mutableStateOf("") }
     var jobOutput by remember { mutableStateOf("") }
+    var apkPath by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val store = remember { AutonomousJobStore(context) }
     val backendUrl = remember(BuildConfig.AI_API_URL) {
         BuildConfig.AI_API_URL.substringBeforeLast("/v1/chat").trimEnd('/')
     }
     val backendConfigured = backendUrl.isNotBlank() &&
         !backendUrl.contains("YOUR_BACKEND_URL") &&
         (backendUrl.startsWith("http://") || backendUrl.startsWith("https://"))
+
+    fun loadJob(id: String) {
+        val record = store.load(id) ?: return
+        jobId = id
+        prompt = record.request
+        budget = AutonomousWorkLoop.WorkBudget.values().firstOrNull { it.minutes == record.budgetMinutes }
+            ?: AutonomousWorkLoop.WorkBudget.MINUTES_10
+        install = record.install
+        jobState = record.state
+        jobOutput = record.output
+        apkPath = record.apkPath
+    }
 
     suspend fun refresh() {
         state = BuildManagerState.Inspecting
@@ -46,16 +65,20 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
         state = BuildManagerState.Ready(status!!)
     }
 
-    LaunchedEffect(Unit) { refresh() }
+    LaunchedEffect(Unit) {
+        store.lastJobId()?.let { loadJob(it) }
+        refresh()
+    }
 
     LaunchedEffect(jobId) {
         val id = jobId ?: return@LaunchedEffect
         val manager = WorkManager.getInstance(agent.context)
         while (true) {
             val info = withContext(Dispatchers.IO) { manager.getWorkInfoById(id).get() }
-            val record = withContext(Dispatchers.IO) { AutonomousJobStore(agent.context).load(id) }
+            val record = withContext(Dispatchers.IO) { store.load(id) }
             jobState = record?.state ?: info.state.name
             jobOutput = record?.output.orEmpty()
+            apkPath = record?.apkPath
             running = !info.state.isFinished
             if (info.state.isFinished) break
             delay(1000)
@@ -68,7 +91,7 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
     ) {
         item {
             Text("ساخت خودکار AI", style = MaterialTheme.typography.headlineSmall)
-            Text("مرحله ۳: صف پایدار پس‌زمینه → Planner → Build → Test → Diagnostics → اصلاح خودکار")
+            Text("مرحله ۵: اجرای طولانی → بازیابی Job → APK Artifact → Build/Test → Diagnostics → اصلاح خودکار")
         }
 
         item {
@@ -116,6 +139,7 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
                                 running = true
                                 jobState = "QUEUED"
                                 jobOutput = "در صف اجرای پس‌زمینه قرار گرفت."
+                                apkPath = null
                                 val input = Data.Builder()
                                     .putString(AutonomousBuildWorker.KEY_JOB_ID, id)
                                     .putString(AutonomousBuildWorker.KEY_REQUEST, prompt.trim())
@@ -153,6 +177,36 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
                         Text("وضعیت: $jobState")
                         if (running) LinearProgressIndicator(Modifier.fillMaxWidth())
                         if (jobOutput.isNotBlank()) Text(jobOutput.takeLast(6000))
+
+                        val apk = apkPath?.let(::File)?.takeIf { it.isFile }
+                        if (apk != null) {
+                            Text("📦 APK آماده است: ${apk.name}")
+                            Text("حجم: ${formatBytes(apk.length())}", style = MaterialTheme.typography.bodySmall)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = {
+                                    val uri = FileProvider.getUriForFile(context, "${BuildConfig.APPLICATION_ID}.fileprovider", apk)
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW).apply {
+                                            setDataAndType(uri, "application/vnd.android.package-archive")
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                    )
+                                }) { Text("باز کردن APK") }
+                                OutlinedButton(onClick = {
+                                    val uri = FileProvider.getUriForFile(context, "${BuildConfig.APPLICATION_ID}.fileprovider", apk)
+                                    context.startActivity(
+                                        Intent.createChooser(
+                                            Intent(Intent.ACTION_SEND).apply {
+                                                type = "application/vnd.android.package-archive"
+                                                putExtra(Intent.EXTRA_STREAM, uri)
+                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            },
+                                            "اشتراک APK"
+                                        )
+                                    )
+                                }) { Text("اشتراک") }
+                            }
+                        }
                     }
                 }
             }

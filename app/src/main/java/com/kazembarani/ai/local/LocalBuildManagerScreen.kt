@@ -6,11 +6,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.work.Constraints
+import androidx.work.Data
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import com.kazembarani.ai.BuildConfig
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import java.util.UUID
 
 @Composable
 fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = CompanionBuildRuntime()) {
@@ -21,10 +27,9 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
     var budget by remember { mutableStateOf(AutonomousWorkLoop.WorkBudget.MINUTES_10) }
     var install by remember { mutableStateOf(false) }
     var running by remember { mutableStateOf(false) }
-    var progress by remember { mutableStateOf<List<AutonomousBuildCoordinator.Progress>>(emptyList()) }
-    var finalOutput by remember { mutableStateOf("") }
-    var job by remember { mutableStateOf<Job?>(null) }
-    val scope = rememberCoroutineScope()
+    var jobId by remember { mutableStateOf<String?>(null) }
+    var jobState by remember { mutableStateOf("") }
+    var jobOutput by remember { mutableStateOf("") }
     val backendUrl = remember(BuildConfig.AI_API_URL) {
         BuildConfig.AI_API_URL.substringBeforeLast("/v1/chat").trimEnd('/')
     }
@@ -41,8 +46,18 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
 
     LaunchedEffect(Unit) { refresh() }
 
-    DisposableEffect(Unit) {
-        onDispose { job?.cancel() }
+    LaunchedEffect(jobId) {
+        val id = jobId ?: return@LaunchedEffect
+        val manager = WorkManager.getInstance(agent.context)
+        while (true) {
+            val info = manager.getWorkInfoById(id).get()
+            val record = withContext(Dispatchers.IO) { AutonomousJobStore(agent.context).load(id) }
+            jobState = record?.state ?: info.state.name
+            jobOutput = record?.output.orEmpty()
+            running = !info.state.isFinished
+            if (info.state.isFinished) break
+            delay(1000)
+        }
     }
 
     LazyColumn(
@@ -51,7 +66,7 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
     ) {
         item {
             Text("ساخت خودکار AI", style = MaterialTheme.typography.headlineSmall)
-            Text("مرحله ۲: Planner معتبر → Build → تست Android → Logcat/Screenshot → بازخورد → اصلاح خودکار")
+            Text("مرحله ۳: صف پایدار پس‌زمینه → Planner → Build → Test → Diagnostics → اصلاح خودکار")
         }
 
         item {
@@ -94,37 +109,48 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
                         Button(
                             enabled = !running && prompt.isNotBlank() && runtimeStatus?.canBuild == true && backendConfigured,
                             onClick = {
-                                progress = emptyList()
-                                finalOutput = ""
+                                val id = UUID.randomUUID().toString()
+                                jobId = id
                                 running = true
-                                job = scope.launch {
-                                    val coordinator = AutonomousBuildCoordinator(
-                                        agent = agent,
-                                        runtime = runtime,
-                                        backendUrl = backendUrl
-                                    )
-                                    try {
-                                        val result = coordinator.run(
-                                            request = prompt,
-                                            budget = budget,
-                                            install = install,
-                                            onProgress = { item -> progress = progress + item }
-                                        )
-                                        finalOutput = result.finalOutput
-                                    } catch (e: Exception) {
-                                        finalOutput = e.message ?: "خطای نامشخص"
-                                    } finally {
-                                        running = false
-                                    }
-                                }
+                                jobState = "QUEUED"
+                                jobOutput = "در صف اجرای پس‌زمینه قرار گرفت."
+                                val input = Data.Builder()
+                                    .putString(AutonomousBuildWorker.KEY_JOB_ID, id)
+                                    .putString(AutonomousBuildWorker.KEY_REQUEST, prompt.trim())
+                                    .putInt(AutonomousBuildWorker.KEY_BUDGET, budget.minutes)
+                                    .putBoolean(AutonomousBuildWorker.KEY_INSTALL, install)
+                                    .build()
+                                val request = OneTimeWorkRequestBuilder<AutonomousBuildWorker>()
+                                    .setInputData(input)
+                                    .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                                    .build()
+                                WorkManager.getInstance(agent.context).enqueueUniqueWork(
+                                    "autonomous-build-$id",
+                                    ExistingWorkPolicy.REPLACE,
+                                    request
+                                )
                             }
                         ) { Text(if (running) "در حال کار…" else "شروع ساخت خودکار") }
 
                         if (running) {
-                            OutlinedButton(onClick = { job?.cancel(); running = false }) {
-                                Text("توقف")
-                            }
+                            OutlinedButton(onClick = {
+                                jobId?.let { WorkManager.getInstance(agent.context).cancelWorkById(it) }
+                            }) { Text("توقف") }
                         }
+                    }
+                }
+            }
+        }
+
+        if (jobId != null) {
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("کار پس‌زمینه", style = MaterialTheme.typography.titleMedium)
+                        Text("شناسه: ${jobId!!.take(8)}…")
+                        Text("وضعیت: $jobState")
+                        if (running) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        if (jobOutput.isNotBlank()) Text(jobOutput.takeLast(6000))
                     }
                 }
             }
@@ -172,34 +198,9 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
             }
         }
 
-        if (progress.isNotEmpty()) {
-            item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("گزارش تلاش‌های خودکار", style = MaterialTheme.typography.titleMedium)
-                        progress.forEach { item ->
-                            Text("تلاش ${item.attempt}: ${stageLabel(item.stage)} ${if (item.success) "✅" else "❌"}")
-                            Text(item.output.takeLast(1200), style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-            }
-        }
-
-        if (finalOutput.isNotBlank()) {
-            item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("نتیجه نهایی", style = MaterialTheme.typography.titleMedium)
-                        Text(finalOutput.takeLast(6000))
-                    }
-                }
-            }
-        }
-
         item {
             Button(
-                onClick = { scope.launch { refresh() } },
+                onClick = { kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch { refresh() } },
                 enabled = !running && state !is BuildManagerState.Inspecting
             ) { Text("بررسی Runtime و ابزارها") }
         }
@@ -208,17 +209,6 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
 
 @Composable private fun ToolRow(name: String, installed: Boolean) {
     Text(if (installed) "✅ $name" else "⬜ $name — آماده نیست")
-}
-
-private fun stageLabel(stage: String): String = when (stage) {
-    "PLAN" -> "برنامه‌ریزی و اعتبارسنجی AI"
-    "PREPARE" -> "آماده‌سازی"
-    "BUILD" -> "ساخت APK"
-    "TEST" -> "تست Android"
-    "INSTALL" -> "نصب APK"
-    "COMPLETE" -> "تکمیل"
-    "FAILED" -> "خطا، Logcat/Screenshot و بازخورد به AI"
-    else -> stage
 }
 
 private fun formatBytes(bytes: Long): String = when {

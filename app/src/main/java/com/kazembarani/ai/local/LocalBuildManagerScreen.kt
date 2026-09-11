@@ -19,7 +19,7 @@ import java.io.File
 import java.util.UUID
 
 @Composable
-fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = CompanionBuildRuntime()) {
+fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = CompanionBuildRuntime(BuildConfig.RUNTIME_URL, BuildConfig.RUNTIME_TOKEN.ifBlank { null })) {
     val context = LocalContext.current
     var state by remember { mutableStateOf<BuildManagerState>(BuildManagerState.Idle) }
     var status by remember { mutableStateOf<LocalBuildAgent.ToolchainStatus?>(null) }
@@ -32,69 +32,21 @@ fun LocalBuildManagerScreen(agent: LocalBuildAgent, runtime: BuildRuntime = Comp
     var jobState by remember { mutableStateOf("") }
     var jobOutput by remember { mutableStateOf("") }
     var apkPath by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
-    val store = remember { AutonomousJobStore(context) }
-
-    fun loadJob(id: String) {
-        val record = store.load(id) ?: return
-        jobId = id; prompt = record.request
-        budget = AutonomousWorkLoop.WorkBudget.values().firstOrNull { it.minutes == record.budgetMinutes } ?: AutonomousWorkLoop.WorkBudget.MINUTES_10
-        install = record.install; jobState = record.state; jobOutput = record.output; apkPath = record.apkPath
-    }
-    suspend fun refresh() {
-        state = BuildManagerState.Inspecting
-        status = withContext(Dispatchers.IO) { agent.inspectToolchain() }
-        runtimeStatus = withContext(Dispatchers.IO) { runtime.capabilities() }
-        state = BuildManagerState.Ready(status!!)
-    }
+    val scope = rememberCoroutineScope(); val store = remember { AutonomousJobStore(context) }
+    fun loadJob(id: String) { val record = store.load(id) ?: return; jobId = id; prompt = record.request; budget = AutonomousWorkLoop.WorkBudget.values().firstOrNull { it.minutes == record.budgetMinutes } ?: AutonomousWorkLoop.WorkBudget.MINUTES_10; install = record.install; jobState = record.state; jobOutput = record.output; apkPath = record.apkPath }
+    suspend fun refresh() { state = BuildManagerState.Inspecting; status = withContext(Dispatchers.IO) { agent.inspectToolchain() }; runtimeStatus = withContext(Dispatchers.IO) { runtime.capabilities() }; state = BuildManagerState.Ready(status!!) }
     LaunchedEffect(Unit) { store.lastJobId()?.let { loadJob(it) }; refresh() }
-    LaunchedEffect(jobId) {
-        val id = jobId ?: return@LaunchedEffect
-        val workId = runCatching { UUID.fromString(id) }.getOrNull() ?: return@LaunchedEffect
-        val manager = WorkManager.getInstance(agent.context)
-        while (true) {
-            val info = withContext(Dispatchers.IO) { manager.getWorkInfoById(workId).get() }
-            val record = withContext(Dispatchers.IO) { store.load(id) }
-            jobState = record?.state ?: info?.state?.name.orEmpty(); jobOutput = record?.output.orEmpty(); apkPath = record?.apkPath
-            running = info?.let { !it.state.isFinished } == true
-            if (info == null || info.state.isFinished) break
-            delay(1000)
-        }
-    }
+    LaunchedEffect(jobId) { val id = jobId ?: return@LaunchedEffect; val workId = runCatching { UUID.fromString(id) }.getOrNull() ?: return@LaunchedEffect; val manager = WorkManager.getInstance(agent.context); while (true) { val info = withContext(Dispatchers.IO) { manager.getWorkInfoById(workId).get() }; val record = withContext(Dispatchers.IO) { store.load(id) }; jobState = record?.state ?: info?.state?.name.orEmpty(); jobOutput = record?.output.orEmpty(); apkPath = record?.apkPath; running = info?.let { !it.state.isFinished } == true; if (info == null || info.state.isFinished) break; delay(1000) } }
     LazyColumn(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text("استودیو ساخت نسخه ۱۳", style = MaterialTheme.typography.headlineSmall); Text("Planner → Build → Test → Diagnostics → Repair → APK") }
-        item {
-            Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("ساخت روی گوشی", style = MaterialTheme.typography.titleMedium)
-                OutlinedTextField(value = prompt, onValueChange = { prompt = it }, modifier = Modifier.fillMaxWidth(), minLines = 4, enabled = !running, placeholder = { Text("مثلاً یک اپ یادداشت با جست‌وجو، ذخیره محلی و رابط فارسی بساز") })
-                Text("بودجه زمانی")
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { AutonomousWorkLoop.WorkBudget.values().forEach { option -> FilterChip(selected = budget == option, onClick = { if (!running) budget = option }, label = { Text("${option.minutes} دقیقه") }) } }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Column(Modifier.weight(1f)) { Text("نصب APK پس از Build"); Text("اختیاری", style = MaterialTheme.typography.bodySmall) }; Switch(checked = install, onCheckedChange = { if (!running) install = it }) }
-                val runtimeReady = runtimeStatus?.canBuild == true
-                if (!runtimeReady) Text("🟠 Runtime اجرای Build روی گوشی هنوز آماده نیست. می‌توانی وضعیت و Toolchain را بررسی کنی.", color = MaterialTheme.colorScheme.error)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(enabled = !running && prompt.isNotBlank() && runtimeReady, onClick = {
-                        val id = UUID.randomUUID().toString(); jobId = id; running = true; jobState = "QUEUED"; jobOutput = "در صف اجرای پس‌زمینه قرار گرفت."; apkPath = null
-                        val input = Data.Builder().putString(AutonomousBuildWorker.KEY_JOB_ID, id).putString(AutonomousBuildWorker.KEY_REQUEST, prompt.trim()).putInt(AutonomousBuildWorker.KEY_BUDGET, budget.minutes).putBoolean(AutonomousBuildWorker.KEY_INSTALL, install).build()
-                        val request = OneTimeWorkRequestBuilder<AutonomousBuildWorker>().setInputData(input).setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
-                        WorkManager.getInstance(agent.context).enqueueUniqueWork("autonomous-build-$id", ExistingWorkPolicy.REPLACE, request)
-                    }) { Text(if (running) "در حال کار…" else "شروع ساخت خودکار") }
-                    if (running) OutlinedButton(onClick = { jobId?.let { runCatching { WorkManager.getInstance(agent.context).cancelWorkById(UUID.fromString(it)) } } }) { Text("توقف") }
-                }
-            } }
-        }
-        if (jobId != null) item {
-            Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("کار پس‌زمینه", style = MaterialTheme.typography.titleMedium); Text("شناسه: ${jobId!!.take(8)}…"); Text("وضعیت: $jobState"); if (running) LinearProgressIndicator(Modifier.fillMaxWidth()); if (jobOutput.isNotBlank()) Text(jobOutput.takeLast(6000))
-                val apk = apkPath?.let(::File)?.takeIf { it.isFile }
-                if (apk != null) { Text("📦 APK آماده است: ${apk.name}"); Text("حجم: ${formatBytes(apk.length())}", style = MaterialTheme.typography.bodySmall); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { val uri = FileProvider.getUriForFile(context, "${BuildConfig.APPLICATION_ID}.fileprovider", apk); context.startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri, "application/vnd.android.package-archive"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }) { Text("باز کردن APK") }
-                    OutlinedButton(onClick = { val uri = FileProvider.getUriForFile(context, "${BuildConfig.APPLICATION_ID}.fileprovider", apk); context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "application/vnd.android.package-archive"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }, "اشتراک APK")) }) { Text("اشتراک") }
-                } }
-            } }
-        }
+        item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("ساخت خودکار", style = MaterialTheme.typography.titleMedium); OutlinedTextField(value = prompt, onValueChange = { prompt = it }, modifier = Modifier.fillMaxWidth(), minLines = 4, enabled = !running, placeholder = { Text("مثلاً یک اپ یادداشت با رابط فارسی بساز") }); Text("بودجه زمانی"); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { AutonomousWorkLoop.WorkBudget.values().forEach { option -> FilterChip(selected = budget == option, onClick = { if (!running) budget = option }, label = { Text("${option.minutes} دقیقه") }) } }; Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Column(Modifier.weight(1f)) { Text("نصب APK پس از Build"); Text("اختیاری", style = MaterialTheme.typography.bodySmall) }; Switch(checked = install, onCheckedChange = { if (!running) install = it }) }
+            val runtimeReady = runtimeStatus?.canBuild == true; if (!runtimeReady) Text("🟠 Runtime ساخت در دسترس نیست. برای Build واقعی باید Runtime معتبر و متصل باشد.", color = MaterialTheme.colorScheme.error)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(enabled = !running && prompt.isNotBlank() && runtimeReady, onClick = { val id = UUID.randomUUID().toString(); jobId = id; running = true; jobState = "QUEUED"; jobOutput = "در صف اجرای پس‌زمینه قرار گرفت."; apkPath = null; val input = Data.Builder().putString(AutonomousBuildWorker.KEY_JOB_ID, id).putString(AutonomousBuildWorker.KEY_REQUEST, prompt.trim()).putInt(AutonomousBuildWorker.KEY_BUDGET, budget.minutes).putBoolean(AutonomousBuildWorker.KEY_INSTALL, install).build(); val work = OneTimeWorkRequestBuilder<AutonomousBuildWorker>().setInputData(input).setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build(); WorkManager.getInstance(agent.context).enqueueUniqueWork("autonomous-build-$id", ExistingWorkPolicy.REPLACE, work) }) { Text(if (running) "در حال کار…" else "شروع ساخت") }; if (running) OutlinedButton(onClick = { jobId?.let { runCatching { WorkManager.getInstance(agent.context).cancelWorkById(UUID.fromString(it)) } } }) { Text("توقف") } }
+        } } }
+        if (jobId != null) item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("کار پس‌زمینه", style = MaterialTheme.typography.titleMedium); Text("شناسه: ${jobId!!.take(8)}…"); Text("وضعیت: $jobState"); if (running) LinearProgressIndicator(Modifier.fillMaxWidth()); if (jobOutput.isNotBlank()) Text(jobOutput.takeLast(6000)); val apk = apkPath?.let(::File)?.takeIf { it.isFile }; if (apk != null) { Text("📦 APK آماده است: ${apk.name}"); Text("حجم: ${formatBytes(apk.length())}", style = MaterialTheme.typography.bodySmall); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = { val uri = FileProvider.getUriForFile(context, "${BuildConfig.APPLICATION_ID}.fileprovider", apk); context.startActivity(Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri, "application/vnd.android.package-archive"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }) { Text("باز کردن APK") }; OutlinedButton(onClick = { val uri = FileProvider.getUriForFile(context, "${BuildConfig.APPLICATION_ID}.fileprovider", apk); context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "application/vnd.android.package-archive"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }, "اشتراک APK")) }) { Text("اشتراک") } } } } } }
         item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Runtime", style = MaterialTheme.typography.titleMedium); val r = runtimeStatus; Text(if (r?.available == true) "🟢 Runtime متصل" else "🔴 Runtime متصل نیست"); if (r != null) { Text(r.note); Text("Build: ${r.canBuild} | Test: ${r.canTest} | Install: ${r.canInstall}"); Text("Logcat: ${r.canCaptureLogs} | Screenshot: ${r.canCaptureScreenshots}") } } } }
-        item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Toolchain محلی", style = MaterialTheme.typography.titleMedium); when (val current = state) { BuildManagerState.Idle, BuildManagerState.Inspecting -> { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("در حال بررسی ابزارها…") }; is BuildManagerState.Ready -> { ToolRow("JDK", current.status.hasJdk); ToolRow("Android SDK", current.status.hasAndroidSdk); ToolRow("Gradle", current.status.hasGradle); ToolRow("ADB", current.status.hasAdb); Text("فضای آزاد: ${formatBytes(current.status.freeBytes)}"); Text(current.status.note) }; BuildManagerState.Preparing -> Text("در حال آماده‌سازی…"); is BuildManagerState.Building -> Text("در حال Build: ${current.project.name}"); is BuildManagerState.Testing -> Text("در حال تست: ${current.project.name}"); is BuildManagerState.Success -> Text("✅ Build موفق بود"); is BuildManagerState.Failed -> Text("❌ ${current.message}") } } } }
+        item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Toolchain محلی", style = MaterialTheme.typography.titleMedium); when (val current = state) { BuildManagerState.Idle, BuildManagerState.Inspecting -> { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("در حال بررسی…") }; is BuildManagerState.Ready -> { ToolRow("JDK", current.status.hasJdk); ToolRow("Android SDK", current.status.hasAndroidSdk); ToolRow("Gradle", current.status.hasGradle); ToolRow("ADB", current.status.hasAdb); Text("فضای آزاد: ${formatBytes(current.status.freeBytes)}"); Text(current.status.note) }; BuildManagerState.Preparing -> Text("در حال آماده‌سازی…"); is BuildManagerState.Building -> Text("در حال Build: ${current.project.name}"); is BuildManagerState.Testing -> Text("در حال Test: ${current.project.name}"); is BuildManagerState.Success -> Text("✅ موفق"); is BuildManagerState.Failed -> Text("❌ ${current.message}") } } } }
         item { Button(onClick = { scope.launch { refresh() } }, enabled = !running && state !is BuildManagerState.Inspecting) { Text("بررسی Runtime و ابزارها") } }
     }
 }

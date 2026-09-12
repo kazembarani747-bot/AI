@@ -18,8 +18,8 @@ class SmokeInstrumentedTest {
     }
 
     @Test
-    fun mainActivityLaunches() {
-        ActivityScenario.launch<MainActivity>(Intent(context(), MainActivity::class.java)).use { scenario ->
+    fun studioActivityLaunches() {
+        ActivityScenario.launch<StudioActivity>(Intent(context(), StudioActivity::class.java)).use { scenario ->
             scenario.onActivity { activity -> assertNotNull(activity) }
         }
     }

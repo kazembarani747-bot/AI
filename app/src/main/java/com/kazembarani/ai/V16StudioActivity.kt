@@ -11,10 +11,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kazembarani.ai.local.ApiKeyStore
 
 class V16StudioActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!ApiKeyStore.hasKey(this)) {
+            startActivity(Intent(this, WelcomeActivity::class.java))
+            finish()
+            return
+        }
         setContent { V16Home { startActivity(Intent(this, StudioActivity::class.java)) } }
     }
 }

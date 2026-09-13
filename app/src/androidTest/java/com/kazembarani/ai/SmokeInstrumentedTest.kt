@@ -11,24 +11,20 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class SmokeInstrumentedTest {
-    @Test
-    fun appContextHasExpectedPackage() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        assertEquals("com.kazembarani.ai", context.packageName)
+    @Test fun appContextHasExpectedPackage() {
+        assertEquals("com.kazembarani.ai", InstrumentationRegistry.getInstrumentation().targetContext.packageName)
     }
 
-    @Test
-    fun welcomeActivityLaunches() {
-        ActivityScenario.launch<WelcomeActivity>(Intent(context(), WelcomeActivity::class.java)).use { scenario ->
-            scenario.onActivity { activity -> assertNotNull(activity) }
-        }
+    @Test fun v16StudioActivityLaunches() {
+        ActivityScenario.launch<V16StudioActivity>(Intent(context(), V16StudioActivity::class.java)).use { it.onActivity { activity -> assertNotNull(activity) } }
     }
 
-    @Test
-    fun studioActivityLaunches() {
-        ActivityScenario.launch<StudioActivity>(Intent(context(), StudioActivity::class.java)).use { scenario ->
-            scenario.onActivity { activity -> assertNotNull(activity) }
-        }
+    @Test fun welcomeActivityLaunches() {
+        ActivityScenario.launch<WelcomeActivity>(Intent(context(), WelcomeActivity::class.java)).use { it.onActivity { activity -> assertNotNull(activity) } }
+    }
+
+    @Test fun studioActivityLaunches() {
+        ActivityScenario.launch<StudioActivity>(Intent(context(), StudioActivity::class.java)).use { it.onActivity { activity -> assertNotNull(activity) } }
     }
 
     private fun context() = InstrumentationRegistry.getInstrumentation().targetContext

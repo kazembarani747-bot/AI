@@ -19,14 +19,23 @@ class OpenAiClient(private val context: Context) {
         .writeTimeout(180, TimeUnit.SECONDS)
         .build()
 
-    suspend fun ask(prompt: String): String = request(prompt, webSearch = false)
+    suspend fun ask(prompt: String): String = request(withMemory(prompt), webSearch = false)
 
-    suspend fun askWithWebSearch(prompt: String): String = request(prompt, webSearch = true)
+    suspend fun askWithWebSearch(prompt: String): String = request(withMemory(prompt), webSearch = true)
 
-    suspend fun testKey(): String = ask("Reply with exactly: OK").trim()
+    suspend fun testKey(): String = request("Reply with exactly: OK", webSearch = false).trim()
+
+    private fun withMemory(prompt: String): String {
+        val memory = MemoryStore.contextPrompt(context)
+        return buildString {
+            append("You are the user's persistent personal AI assistant. Speak naturally and warmly. If the user writes Persian, answer in Persian. Understand casual conversation, emotional support, jokes, emojis and technical requests. Do not claim to remember anything outside the supplied memory.\n\n")
+            append(prompt)
+            append(memory)
+        }
+    }
 
     private suspend fun request(prompt: String, webSearch: Boolean): String = withContext(Dispatchers.IO) {
-        val config = ApiKeyStore.getConfig(context) ?: throw IllegalStateException("کلید API تنظیم نشده است. از تنظیمات، شرکت و کلید را وارد کن.")
+        val config = ApiKeyStore.getConfig(context) ?: throw IllegalStateException("🔑 هنوز هیچ API Key تنظیم نشده است. فقط کلیدت را وارد کن تا برنامه آن را تشخیص دهد.")
         val url = when (config.protocol) {
             AiProviderConfig.Protocol.RESPONSES -> "${config.baseUrl}/responses"
             AiProviderConfig.Protocol.CHAT_COMPLETIONS -> "${config.baseUrl}/chat/completions"
@@ -37,7 +46,7 @@ class OpenAiClient(private val context: Context) {
                 .put("input", prompt)
                 .put("store", false)
                 .apply {
-                    if (webSearch && config.company.equals("OpenAI", ignoreCase = true)) {
+                    if (webSearch && config.company.contains("OpenAI", true)) {
                         put("tools", JSONArray().put(JSONObject().put("type", "web_search")))
                     }
                 }
@@ -60,15 +69,15 @@ class OpenAiClient(private val context: Context) {
                 extractText(JSONObject(raw), config.protocol)
             }
         } catch (e: java.net.UnknownHostException) {
-            throw IllegalStateException("🌐 اتصال اینترنت برقرار نیست یا سرور API در دسترس نیست.")
+            throw IllegalStateException("🌐 اینترنت یا سرور «${config.company}» در دسترس نیست.")
         } catch (e: java.net.SocketTimeoutException) {
-            throw IllegalStateException("⏱️ زمان پاسخ API تمام شد. اتصال یا سرور را بررسی کن.")
+            throw IllegalStateException("⏱️ پاسخ «${config.company}» طول کشید و زمان درخواست تمام شد. دوباره امتحان کن.")
         }
     }
 
     suspend fun generateBuildPlan(request: String, repairContext: String? = null): BuildPlan {
         val prompt = buildString {
-            append("You are an expert Android development agent. Generate a complete runnable Android project.\n")
+            append("You are an expert Android development agent. Understand the user's intent before planning. Generate a complete runnable Android project.\n")
             append("Return ONLY valid JSON: {\"projectName\":string,\"summary\":string,\"files\":{path:string,...},\"buildTasks\":[string],\"testTasks\":[string]}.\n")
             append("Use Kotlin + Jetpack Compose when appropriate. Include real build and instrumentation test tasks. Never use fake success.\n")
             append("User request:\n").append(request)
@@ -95,19 +104,20 @@ class OpenAiClient(private val context: Context) {
             }
             AiProviderConfig.Protocol.CHAT_COMPLETIONS -> root.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty()
         }
-        return result.trim().ifBlank { throw IllegalStateException("پاسخ متنی از سرویس AI دریافت نشد.") }
+        return result.trim().ifBlank { throw IllegalStateException("🤖 سرویس پاسخ متنی برنگرداند. مدل و نوع API را بررسی کن.") }
     }
 
     private fun persianApiError(code: Int, raw: String, company: String): String {
         val message = runCatching { JSONObject(raw).optJSONObject("error")?.optString("message") }.getOrNull().orEmpty()
         val lower = message.lowercase()
         return when {
+            code == 400 -> "⚠️ درخواست برای «$company» نامعتبر بود. مدل، Base URL یا قالب API را بررسی کن."
             code == 401 || lower.contains("invalid api key") || lower.contains("incorrect api key") -> "🔑 کلید API نامعتبر است یا دسترسی آن رد شده است."
-            code == 402 || lower.contains("billing") || lower.contains("account is not active") -> "💳 حساب سرویس «$company» برای API فعال نیست یا اعتبار/صورت‌حساب آن مشکل دارد."
-            code == 403 -> "⛔ دسترسی این کلید به مدل یا سرویس موردنظر مجاز نیست."
-            code == 404 -> "🔎 آدرس API یا مدل پیدا نشد. آدرس پایه و نام مدل را بررسی کن."
-            code == 429 -> "🚦 سقف درخواست یا سهمیه API پر شده است. کمی بعد دوباره امتحان کن یا سهمیه را بررسی کن."
-            code in 500..599 -> "🛠️ سرور «$company» موقتاً خطا داد ($code). دوباره امتحان کن."
+            code == 402 || lower.contains("billing") || lower.contains("account is not active") -> "💳 حساب «$company» برای API فعال نیست یا اعتبار/صورت‌حساب آن مشکل دارد."
+            code == 403 -> "⛔ این کلید اجازه استفاده از مدل یا سرویس انتخاب‌شده را ندارد."
+            code == 404 -> "🔎 آدرس API یا مدل پیدا نشد. Base URL و نام مدل را بررسی کن."
+            code == 429 -> "🚦 سقف درخواست یا سهمیه API پر شده است. کمی بعد دوباره امتحان کن."
+            code in 500..599 -> "🛠️ سرور «$company» موقتاً خطا داد (کد $code)."
             message.isNotBlank() -> "❌ سرویس «$company» خطا داد: $message"
             else -> "❌ درخواست API ناموفق بود (کد $code)."
         }

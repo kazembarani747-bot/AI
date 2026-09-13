@@ -4,7 +4,7 @@ import android.content.Context
 import org.json.JSONObject
 import java.io.File
 
-/** Durable journal for autonomous build jobs, including the latest APK artifact path. */
+/** Durable journal for autonomous build jobs, including APK artifacts and history. */
 class AutonomousJobStore(context: Context) {
     private val root = File(context.filesDir, "ai-workspace/autonomous-jobs").apply { mkdirs() }
     private val prefs = context.getSharedPreferences("autonomous-build", Context.MODE_PRIVATE)
@@ -23,41 +23,32 @@ class AutonomousJobStore(context: Context) {
     fun save(record: Record) {
         val safe = record.id.replace(Regex("[^A-Za-z0-9._-]"), "_")
         File(root, "$safe.json").writeText(
-            JSONObject()
-                .put("id", record.id)
-                .put("request", record.request)
-                .put("budgetMinutes", record.budgetMinutes)
-                .put("install", record.install)
-                .put("state", record.state)
-                .put("output", record.output.takeLast(20_000))
-                .put("apkPath", record.apkPath ?: JSONObject.NULL)
-                .put("updatedAt", record.updatedAt)
-                .toString()
+            JSONObject().put("id", record.id).put("request", record.request)
+                .put("budgetMinutes", record.budgetMinutes).put("install", record.install)
+                .put("state", record.state).put("output", record.output.takeLast(20_000))
+                .put("apkPath", record.apkPath ?: JSONObject.NULL).put("updatedAt", record.updatedAt).toString()
         )
         prefs.edit().putString(KEY_LAST_JOB_ID, record.id).apply()
     }
 
     fun load(id: String): Record? {
-        val file = File(root, "$id.json")
+        val safe = id.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        val file = File(root, "$safe.json")
         if (!file.isFile) return null
         return runCatching {
             val json = JSONObject(file.readText())
-            Record(
-                id = json.getString("id"),
-                request = json.getString("request"),
-                budgetMinutes = json.getInt("budgetMinutes"),
-                install = json.getBoolean("install"),
-                state = json.getString("state"),
-                output = json.optString("output"),
-                apkPath = json.optString("apkPath").takeIf { it.isNotBlank() && it != "null" },
-                updatedAt = json.optLong("updatedAt")
-            )
+            Record(json.getString("id"), json.getString("request"), json.getInt("budgetMinutes"),
+                json.getBoolean("install"), json.getString("state"), json.optString("output"),
+                json.optString("apkPath").takeIf { it.isNotBlank() && it != "null" }, json.optLong("updatedAt"))
         }.getOrNull()
     }
 
+    fun recent(limit: Int = 20): List<Record> = root.listFiles()
+        ?.asSequence()?.filter { it.isFile && it.extension == "json" }
+        ?.mapNotNull { load(it.nameWithoutExtension) }
+        ?.sortedByDescending { it.updatedAt }?.take(limit.coerceIn(1, 100))?.toList().orEmpty()
+
     fun lastJobId(): String? = prefs.getString(KEY_LAST_JOB_ID, null)
 
-    companion object {
-        private const val KEY_LAST_JOB_ID = "last_job_id"
-    }
+    companion object { private const val KEY_LAST_JOB_ID = "last_job_id" }
 }

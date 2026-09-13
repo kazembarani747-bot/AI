@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.sp
 import com.kazembarani.ai.local.ApiKeyStore
 import com.kazembarani.ai.local.V17AccountStore
 import com.kazembarani.ai.local.V17MemoryStore
+import com.kazembarani.ai.local.V17SelfImprovementStore
 
 class V17StudioActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -30,9 +31,11 @@ class V17StudioActivity : ComponentActivity() {
             V17Home(
                 memoryCount = V17MemoryStore.recent(this, 100).size,
                 accountEmail = V17AccountStore.email(this),
+                selfImprovementState = V17SelfImprovementStore.state(this),
                 openStudio = { startActivity(Intent(this, StudioActivity::class.java)) },
                 openWorkspace = { startActivity(Intent(this, PhoneWorkspaceActivity::class.java)) },
-                saveMemory = { V17MemoryStore.add(this, it) }
+                saveMemory = { V17MemoryStore.add(this, it) },
+                setSelfImprovementEnabled = { V17SelfImprovementStore.setEnabled(this, it) }
             )
         }
     }
@@ -42,12 +45,15 @@ class V17StudioActivity : ComponentActivity() {
 private fun V17Home(
     memoryCount: Int,
     accountEmail: String?,
+    selfImprovementState: V17SelfImprovementStore.State,
     openStudio: () -> Unit,
     openWorkspace: () -> Unit,
-    saveMemory: (String) -> Unit
+    saveMemory: (String) -> Unit,
+    setSelfImprovementEnabled: (Boolean) -> Unit
 ) {
     var memoryText by remember { mutableStateOf("") }
     var saved by remember { mutableStateOf(false) }
+    var selfImprovementEnabled by remember { mutableStateOf(selfImprovementState.enabled) }
     MaterialTheme {
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
@@ -90,8 +96,28 @@ private fun V17Home(
                 }
             }
             item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("♻️ خودبهبوددهی V17", fontSize = 18.sp)
+                        Text("AI می‌تواند چرخهٔ تحقیق → پیشنهاد → اعتبارسنجی → آماده‌سازی به‌روزرسانی را اجرا کند.", fontSize = 13.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("فعال", Modifier.weight(1f))
+                            Switch(
+                                checked = selfImprovementEnabled,
+                                onCheckedChange = {
+                                    selfImprovementEnabled = it
+                                    setSelfImprovementEnabled(it)
+                                }
+                            )
+                        }
+                        Text("وضعیت: ${selfImprovementState.lastResult}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("نکته: فعال بودن این چرخه به معنی دور زدن امنیت Android یا نصب مخفی APK نیست؛ هر مرحلهٔ حساس باید از مسیر رسمی سیستم‌عامل عبور کند.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            item {
                 Text("🛡️ مسیر توسعه", fontSize = 17.sp)
-                Text("Memory → Account → Phone Tools → Voice → Agent → Self-Expansion", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Memory → Account → Phone Tools → Voice → Agent → Self-Expansion → Build/Test/Repair", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

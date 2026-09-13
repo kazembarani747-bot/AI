@@ -10,7 +10,7 @@ on:
 jobs:
   android-runtime-validation:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -25,6 +25,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
+
+      - name: Run JVM unit tests
+        run: gradle --no-daemon testDebugUnitTest
 
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
@@ -45,7 +48,9 @@ jobs:
             adb shell monkey -p com.kazembarani.ai 1 || true
             sleep 3
             mkdir -p runtime-diagnostics
-            adb logcat -d -t 1000 > runtime-diagnostics/logcat.txt
+            adb logcat -d -t 1500 > runtime-diagnostics/logcat.txt
+            adb shell dumpsys package com.kazembarani.ai > runtime-diagnostics/package.txt || true
+            adb shell wm size > runtime-diagnostics/display.txt || true
             adb exec-out screencap -p > runtime-diagnostics/screenshot.png
 
       - name: Upload APK and Android diagnostics
@@ -58,4 +63,6 @@ jobs:
             runtime-diagnostics/
             app/build/outputs/androidTest-results/
             app/build/reports/androidTests/
+            app/build/test-results/testDebugUnitTest/
+            app/build/reports/tests/testDebugUnitTest/
           if-no-files-found: warn

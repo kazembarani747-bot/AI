@@ -50,8 +50,17 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: |
-            gradle --no-daemon connectedDebugAndroidTest
+            set +e
             adb install -r app/build/outputs/apk/debug/app-debug.apk
+            install_status=$?
+            if [ "$install_status" -ne 0 ]; then
+              echo "APK installation failed with exit code $install_status"
+              exit "$install_status"
+            fi
+
+            gradle --no-daemon connectedDebugAndroidTest
+            test_status=$?
+
             adb shell am force-stop com.kazembarani.ai || true
             adb shell monkey -p com.kazembarani.ai 1 || true
             sleep 3
@@ -60,6 +69,8 @@ jobs:
             adb shell dumpsys package com.kazembarani.ai > runtime-diagnostics/package.txt || true
             adb shell wm size > runtime-diagnostics/display.txt || true
             adb exec-out screencap -p > runtime-diagnostics/screenshot.png
+
+            exit "$test_status"
 
       - name: Upload V16.5 APK and Android diagnostics
         if: always()

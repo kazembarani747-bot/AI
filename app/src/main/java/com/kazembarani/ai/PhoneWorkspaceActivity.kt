@@ -58,6 +58,7 @@ class PhoneWorkspaceActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun WorkspaceScreen(projects: List<File>, selected: Uri?, open: () -> Unit, export: () -> Unit) {
     MaterialTheme {

@@ -1,6 +1,5 @@
 package com.kazembarani.ai
 
-import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -10,36 +9,51 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kazembarani.ai.local.WorkspaceStore
 import java.io.File
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 class PhoneWorkspaceActivity : ComponentActivity() {
     private val openFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { showSelected(it) }
+        uri?.let { selectedUri = it; render() }
     }
     private val createFile = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         uri?.let { exportWorkspace(it) }
     }
-    private var selected: Uri? = null
+    private var selectedUri: Uri? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { WorkspaceScreen(
-            projects = WorkspaceStore.listProjects(this),
-            selected = selected,
-            open = { openFile.launch(arrayOf("*/*")) },
-            export = { createFile.launch("AI-Workspace.zip") }
-        ) }
+        render()
     }
 
-    private fun showSelected(uri: Uri) { selected = uri; recreate() }
+    private fun render() {
+        setContent {
+            WorkspaceScreen(
+                projects = WorkspaceStore.listProjects(this),
+                selected = selectedUri,
+                open = { openFile.launch(arrayOf("*/*")) },
+                export = { createFile.launch("AI-Workspace.zip") }
+            )
+        }
+    }
+
     private fun exportWorkspace(uri: Uri) {
-        contentResolver.openOutputStream(uri)?.use { out ->
-            out.write("AI Workspace\nProjects: ${WorkspaceStore.listProjects(this).joinToString { it.name }}\n".toByteArray())
+        contentResolver.openOutputStream(uri)?.use { output ->
+            ZipOutputStream(output).use { zip ->
+                val root = WorkspaceStore.root(this)
+                root.walkTopDown().filter { it.isFile }.forEach { file ->
+                    val entryName = root.toPath().relativize(file.toPath()).toString().replace(File.separatorChar, '/')
+                    zip.putNextEntry(ZipEntry(entryName))
+                    file.inputStream().use { it.copyTo(zip) }
+                    zip.closeEntry()
+                }
+            }
         }
     }
 }

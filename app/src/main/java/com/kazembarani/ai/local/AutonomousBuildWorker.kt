@@ -12,7 +12,7 @@ import kotlinx.coroutines.CancellationException
 import java.io.File
 import java.util.UUID
 
-/** Durable build loop. The selected trusted runtime performs compilation/testing; AI handles planning and repair passes. */
+/** Durable build loop. The trusted runtime performs compilation/testing; AI handles planning and repair passes. */
 class AutonomousBuildWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
         val jobId = inputData.getString(KEY_JOB_ID) ?: UUID.randomUUID().toString()
@@ -25,14 +25,8 @@ class AutonomousBuildWorker(appContext: Context, params: WorkerParameters) : Cor
             store.save(AutonomousJobStore.Record(jobId, request, budgetMinutes, install, state, output, apkPath, System.currentTimeMillis()))
         }
 
-        if (request.isBlank()) {
-            save("FAILED", "توضیح پروژه خالی است.")
-            return Result.failure()
-        }
-        if (!ApiKeyStore.hasKey(applicationContext)) {
-            save("FAILED", "کلید OpenAI روی دستگاه تنظیم نشده است.")
-            return Result.failure()
-        }
+        if (request.isBlank()) { save("FAILED", "توضیح پروژه خالی است."); return Result.failure() }
+        if (!ApiKeyStore.hasKey(applicationContext)) { save("FAILED", "کلید API روی دستگاه تنظیم نشده است."); return Result.failure() }
 
         setForeground(createForegroundInfo(jobId, "بررسی پروژه و آماده‌سازی ساخت…"))
         save("RUNNING", "ساخت خودکار شروع شد.")
@@ -47,14 +41,13 @@ class AutonomousBuildWorker(appContext: Context, params: WorkerParameters) : Cor
             }
 
             val ai = OpenAiClient(applicationContext)
-            // The UI can enqueue a request without a precomputed plan. Generate the first
-            // BuildPlan here so recovery/background execution is self-contained.
             if (planJson.isBlank()) {
                 setForeground(createForegroundInfo(jobId, "AI در حال ساخت BuildPlan اولیه…"))
                 val initial = ai.generateBuildPlan(request)
                 initial.validate()
                 planJson = initial.toJson().toString()
-                save("RUNNING", "BuildPlan اولیه ساخته شد.\n${initial.summary}")
+                persistWorkspace(initial)
+                save("RUNNING", "BuildPlan اولیه ساخته و روی گوشی ذخیره شد.\n${initial.summary}")
             }
 
             val pipeline = LocalBuildPipeline(agent, runtime)
@@ -67,6 +60,7 @@ class AutonomousBuildWorker(appContext: Context, params: WorkerParameters) : Cor
                 setForeground(createForegroundInfo(jobId, "تلاش $attempt برای Build/Test…"))
                 val plan = BuildPlan.fromJson(org.json.JSONObject(planJson))
                 plan.validate()
+                persistWorkspace(plan)
                 val result = pipeline.run(plan, install)
                 val apk = result.apk ?: findLatestApk(agent.workspace)
                 lastOutput = result.output
@@ -78,6 +72,7 @@ class AutonomousBuildWorker(appContext: Context, params: WorkerParameters) : Cor
                 val repaired = ai.generateBuildPlan(request, result.output.takeLast(60_000))
                 repaired.validate()
                 planJson = repaired.toJson().toString()
+                persistWorkspace(repaired)
             }
 
             save("FAILED", "زمان ساخت تمام شد.\n\n$lastOutput")
@@ -88,6 +83,12 @@ class AutonomousBuildWorker(appContext: Context, params: WorkerParameters) : Cor
         } catch (e: Exception) {
             save("FAILED", e.message ?: "خطای نامشخص")
             Result.failure()
+        }
+    }
+
+    private fun persistWorkspace(plan: BuildPlan) {
+        plan.files.forEach { (path, content) ->
+            runCatching { WorkspaceStore.writeText(applicationContext, plan.projectName, path, content) }
         }
     }
 
@@ -102,19 +103,10 @@ class AutonomousBuildWorker(appContext: Context, params: WorkerParameters) : Cor
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .build()
-        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            ForegroundInfo(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            ForegroundInfo(NOTIFICATION_ID, notification)
-        }
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) ForegroundInfo(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC) else ForegroundInfo(NOTIFICATION_ID, notification)
     }
 
-    private fun findLatestApk(workspace: File): File? = runCatching {
-        workspace.walkTopDown()
-            .filter { it.isFile && it.name.endsWith(".apk") }
-            .maxByOrNull { it.lastModified() }
-            ?.takeIf { it.length() > 0L }
-    }.getOrNull()
+    private fun findLatestApk(workspace: File): File? = runCatching { workspace.walkTopDown().filter { it.isFile && it.name.endsWith(".apk") }.maxByOrNull { it.lastModified() }?.takeIf { it.length() > 0L } }.getOrNull()
 
     companion object {
         const val KEY_JOB_ID = "job_id"

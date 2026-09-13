@@ -12,8 +12,8 @@ android {
         applicationId = "com.kazembarani.ai"
         minSdk = 26
         targetSdk = 35
-        versionCode = 162
-        versionName = "16.2"
+        versionCode = 163
+        versionName = "16.3"
         buildConfigField("String", "AI_API_URL", "\"\"")
         buildConfigField("String", "RUNTIME_URL", "\"\"")
         buildConfigField("String", "RUNTIME_TOKEN", "\"\"")

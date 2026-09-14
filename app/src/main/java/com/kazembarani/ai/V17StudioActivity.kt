@@ -18,6 +18,7 @@ import com.kazembarani.ai.local.ApiKeyStore
 import com.kazembarani.ai.local.V17AccountStore
 import com.kazembarani.ai.local.V17MemoryStore
 import com.kazembarani.ai.local.V17SelfImprovementStore
+import com.kazembarani.ai.local.V171RubikaStore
 
 class V17StudioActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -32,8 +33,10 @@ class V17StudioActivity : ComponentActivity() {
                 memoryCount = V17MemoryStore.recent(this, 100).size,
                 accountEmail = V17AccountStore.email(this),
                 selfImprovementState = V17SelfImprovementStore.state(this),
+                rubikaConfigured = !V171RubikaStore.token(this).isNullOrBlank(),
                 openStudio = { startActivity(Intent(this, StudioActivity::class.java)) },
                 openWorkspace = { startActivity(Intent(this, PhoneWorkspaceActivity::class.java)) },
+                openRubika = { startActivity(Intent(this, V171RubikaActivity::class.java)) },
                 saveMemory = { V17MemoryStore.add(this, it) },
                 setSelfImprovementEnabled = { V17SelfImprovementStore.setEnabled(this, it) }
             )
@@ -46,8 +49,10 @@ private fun V17Home(
     memoryCount: Int,
     accountEmail: String?,
     selfImprovementState: V17SelfImprovementStore.State,
+    rubikaConfigured: Boolean,
     openStudio: () -> Unit,
     openWorkspace: () -> Unit,
+    openRubika: () -> Unit,
     saveMemory: (String) -> Unit,
     setSelfImprovementEnabled: (Boolean) -> Unit
 ) {
@@ -55,70 +60,39 @@ private fun V17Home(
     var saved by remember { mutableStateOf(false) }
     var selfImprovementEnabled by remember { mutableStateOf(selfImprovementState.enabled) }
     MaterialTheme {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
-            contentPadding = PaddingValues(vertical = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), contentPadding = PaddingValues(vertical = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.primaryContainer) {
-                        Icon(Icons.Default.AutoAwesome, null, Modifier.padding(14.dp), tint = MaterialTheme.colorScheme.primary)
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text("AI", fontSize = 38.sp)
-                        Text("V17.0 • OpenAI", color = MaterialTheme.colorScheme.primary)
-                    }
+                    Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.primaryContainer) { Icon(Icons.Default.AutoAwesome, null, Modifier.padding(14.dp), tint = MaterialTheme.colorScheme.primary) }
+                    Spacer(Modifier.width(12.dp)); Column { Text("AI", fontSize = 38.sp); Text("V17.1 • OpenAI", color = MaterialTheme.colorScheme.primary) }
                 }
-                Spacer(Modifier.height(8.dp))
-                Text("نسل جدید دستیار شخصی، حافظه و ابزارهای گوشی", fontSize = 20.sp)
+                Spacer(Modifier.height(8.dp)); Text("Runtime، ابزار گوشی و اتصال Bot برای Agent", fontSize = 20.sp)
             }
             item { Button(openStudio, Modifier.fillMaxWidth().height(56.dp)) { Icon(Icons.Default.Chat, null); Spacer(Modifier.width(8.dp)); Text("ورود به Studio 🚀") } }
             item { OutlinedButton(openWorkspace, Modifier.fillMaxWidth().height(52.dp)) { Icon(Icons.Default.Smartphone, null); Spacer(Modifier.width(8.dp)); Text("📱 ابزارهای گوشی") } }
+            item { OutlinedButton(openRubika, Modifier.fillMaxWidth().height(52.dp)) { Icon(Icons.Default.Send, null); Spacer(Modifier.width(8.dp)); Text(if (rubikaConfigured) "🤖 تنظیمات Rubika Bot ✓" else "🤖 راه‌اندازی Rubika Bot") } }
             item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("🧠 حافظه V17", fontSize = 18.sp)
-                        Text("حافظه‌های ذخیره‌شده: $memoryCount")
-                        OutlinedTextField(value = memoryText, onValueChange = { memoryText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("چیزی که می‌خواهی AI به خاطر بسپارد") })
-                        Button(onClick = { if (memoryText.isNotBlank()) { saveMemory(memoryText); memoryText = ""; saved = true } }, enabled = memoryText.isNotBlank()) { Text(if (saved) "ذخیره شد ✓" else "ذخیره در حافظه") }
-                    }
-                }
+                Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("🧠 حافظه V17", fontSize = 18.sp); Text("حافظه‌های ذخیره‌شده: $memoryCount")
+                    OutlinedTextField(memoryText, { memoryText = it }, Modifier.fillMaxWidth(), label = { Text("چیزی که می‌خواهی AI به خاطر بسپارد") })
+                    Button({ if (memoryText.isNotBlank()) { saveMemory(memoryText); memoryText = ""; saved = true } }, enabled = memoryText.isNotBlank()) { Text(if (saved) "ذخیره شد ✓" else "ذخیره در حافظه") }
+                } }
             }
             item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("👤 حساب", fontSize = 18.sp)
-                        Text(accountEmail ?: "هنوز حساب ایمیلی ثبت نشده")
-                        Text("V17.0 فعلاً زیرساخت هویت ایمیل را دارد؛ احراز هویت سروری در مرحله بعدی متصل می‌شود.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
+                Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("👤 حساب", fontSize = 18.sp); Text(accountEmail ?: "هنوز حساب ایمیلی ثبت نشده")
+                    Text("زیرساخت هویت ایمیل فعلاً محلی است و احراز هویت سروری بعداً متصل می‌شود.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } }
             }
             item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("♻️ خودبهبوددهی V17", fontSize = 18.sp)
-                        Text("AI می‌تواند چرخهٔ تحقیق → پیشنهاد → اعتبارسنجی → آماده‌سازی به‌روزرسانی را اجرا کند.", fontSize = 13.sp)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("فعال", Modifier.weight(1f))
-                            Switch(
-                                checked = selfImprovementEnabled,
-                                onCheckedChange = {
-                                    selfImprovementEnabled = it
-                                    setSelfImprovementEnabled(it)
-                                }
-                            )
-                        }
-                        Text("وضعیت: ${selfImprovementState.lastResult}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("نکته: فعال بودن این چرخه به معنی دور زدن امنیت Android یا نصب مخفی APK نیست؛ هر مرحلهٔ حساس باید از مسیر رسمی سیستم‌عامل عبور کند.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
+                Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("♻️ خودبهبوددهی", fontSize = 18.sp)
+                    Text("چرخهٔ تحقیق → پیشنهاد → اعتبارسنجی → آماده‌سازی به‌روزرسانی.", fontSize = 13.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) { Text("فعال", Modifier.weight(1f)); Switch(checked = selfImprovementEnabled, onCheckedChange = { selfImprovementEnabled = it; setSelfImprovementEnabled(it) }) }
+                    Text("وضعیت: ${selfImprovementState.lastResult}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } }
             }
-            item {
-                Text("🛡️ مسیر توسعه", fontSize = 17.sp)
-                Text("Memory → Account → Phone Tools → Voice → Agent → Self-Expansion → Build/Test/Repair", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            item { Text("🛡️ V17.1 Focus", fontSize = 17.sp); Text("Local Runtime → APK Build/Test/Repair → Phone Tools → Rubika Bot Tools", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
 }

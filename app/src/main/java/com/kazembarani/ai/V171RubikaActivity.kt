@@ -10,11 +10,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.kazembarani.ai.local.V171RubikaScheduler
 import com.kazembarani.ai.local.V171RubikaStore
 
 class V171RubikaActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        V171RubikaScheduler.start(this)
         setContent {
             MaterialTheme {
                 RubikaSettings(
@@ -23,7 +25,10 @@ class V171RubikaActivity : ComponentActivity() {
                     removeLinks = V171RubikaStore.removeLinks(this),
                     autoReply = V171RubikaStore.autoReply(this),
                     funnyMode = V171RubikaStore.funnyMode(this),
-                    onSave = { token, owner -> V171RubikaStore.save(this, token, owner) },
+                    onSave = { token, owner ->
+                        V171RubikaStore.save(this, token, owner)
+                        V171RubikaScheduler.start(this)
+                    },
                     onRemoveLinks = { V171RubikaStore.setRemoveLinks(this, it) },
                     onAutoReply = { V171RubikaStore.setAutoReply(this, it) },
                     onFunnyMode = { V171RubikaStore.setFunnyMode(this, it) }
@@ -51,19 +56,17 @@ private fun RubikaSettings(
     LazyColumn(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 20.dp)) {
         item { Text("🤖 Rubika Bot • V17.1", style = MaterialTheme.typography.headlineSmall) }
         item { Text("توکن ربات و شناسه مالک فقط روی همین دستگاه نگه‌داری می‌شوند. توکن وارد لاگ یا GitHub نمی‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        item {
-            OutlinedTextField(tokenText, { tokenText = it }, Modifier.fillMaxWidth(), label = { Text("Bot Token") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
-        }
+        item { OutlinedTextField(tokenText, { tokenText = it }, Modifier.fillMaxWidth(), label = { Text("Bot Token") }, visualTransformation = PasswordVisualTransformation(), singleLine = true) }
         item { OutlinedTextField(ownerText, { ownerText = it }, Modifier.fillMaxWidth(), label = { Text("Owner ID 👑") }, singleLine = true) }
         item { Button({ if (tokenText.isNotBlank() && ownerText.isNotBlank()) { onSave(tokenText, ownerText); saved = true } }, enabled = tokenText.isNotBlank() && ownerText.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text(if (saved) "ذخیره شد ✓" else "ذخیره تنظیمات") } }
         item { SettingSwitch("پاسخ خودکار", autoReply, onAutoReply) }
-        item { SettingSwitch("حذف لینک از متن پردازش‌شده", removeLinks, onRemoveLinks) }
+        item { SettingSwitch("پردازش حذف لینک", removeLinks, onRemoveLinks) }
         item { SettingSwitch("حالت شوخ‌طبعی 😂", funnyMode, onFunnyMode) }
         item {
             Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("قواعد مالک 👑", style = MaterialTheme.typography.titleMedium)
                 Text("دستورهای مدیریتی فقط وقتی مجازند که فرستنده با Owner ID برابر باشد. پیام‌های عادی می‌توانند برای پاسخ AI پردازش شوند.")
-                Text("گروه و چت خصوصی از نظر ساختار پیام پشتیبانی می‌شوند؛ دریافت واقعی پیام‌ها به اجرای Polling/Worker متصل است.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Polling واقعی با WorkManager زمان‌بندی می‌شود؛ Android حداقل بازهٔ ۱۵ دقیقه‌ای برای کار دوره‌ای را اعمال می‌کند.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } }
         }
     }

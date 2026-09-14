@@ -18,6 +18,7 @@ import com.kazembarani.ai.local.ApiKeyStore
 import com.kazembarani.ai.local.V17AccountStore
 import com.kazembarani.ai.local.V17MemoryStore
 import com.kazembarani.ai.local.V17SelfImprovementStore
+import com.kazembarani.ai.local.V171RubikaScheduler
 import com.kazembarani.ai.local.V171RubikaStore
 
 class V17StudioActivity : ComponentActivity() {
@@ -28,6 +29,7 @@ class V17StudioActivity : ComponentActivity() {
             finish()
             return
         }
+        V171RubikaScheduler.start(this)
         setContent {
             V17Home(
                 memoryCount = V17MemoryStore.recent(this, 100).size,
@@ -37,6 +39,7 @@ class V17StudioActivity : ComponentActivity() {
                 openStudio = { startActivity(Intent(this, StudioActivity::class.java)) },
                 openWorkspace = { startActivity(Intent(this, PhoneWorkspaceActivity::class.java)) },
                 openRubika = { startActivity(Intent(this, V171RubikaActivity::class.java)) },
+                openVoice = { startActivity(Intent(this, V171VoiceActivity::class.java)) },
                 saveMemory = { V17MemoryStore.add(this, it) },
                 setSelfImprovementEnabled = { V17SelfImprovementStore.setEnabled(this, it) }
             )
@@ -53,6 +56,7 @@ private fun V17Home(
     openStudio: () -> Unit,
     openWorkspace: () -> Unit,
     openRubika: () -> Unit,
+    openVoice: () -> Unit,
     saveMemory: (String) -> Unit,
     setSelfImprovementEnabled: (Boolean) -> Unit
 ) {
@@ -66,11 +70,12 @@ private fun V17Home(
                     Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.primaryContainer) { Icon(Icons.Default.AutoAwesome, null, Modifier.padding(14.dp), tint = MaterialTheme.colorScheme.primary) }
                     Spacer(Modifier.width(12.dp)); Column { Text("AI", fontSize = 38.sp); Text("V17.1 • OpenAI", color = MaterialTheme.colorScheme.primary) }
                 }
-                Spacer(Modifier.height(8.dp)); Text("Runtime، ابزار گوشی و اتصال Bot برای Agent", fontSize = 20.sp)
+                Spacer(Modifier.height(8.dp)); Text("Runtime، Agent، ابزار گوشی، Voice و Bot", fontSize = 20.sp)
             }
             item { Button(openStudio, Modifier.fillMaxWidth().height(56.dp)) { Icon(Icons.Default.Chat, null); Spacer(Modifier.width(8.dp)); Text("ورود به Studio 🚀") } }
-            item { OutlinedButton(openWorkspace, Modifier.fillMaxWidth().height(52.dp)) { Icon(Icons.Default.Smartphone, null); Spacer(Modifier.width(8.dp)); Text("📱 ابزارهای گوشی") } }
-            item { OutlinedButton(openRubika, Modifier.fillMaxWidth().height(52.dp)) { Icon(Icons.Default.Send, null); Spacer(Modifier.width(8.dp)); Text(if (rubikaConfigured) "🤖 تنظیمات Rubika Bot ✓" else "🤖 راه‌اندازی Rubika Bot") } }
+            item { OutlinedButton(openWorkspace, Modifier.fillMaxWidth().height(52.dp)) { Icon(Icons.Default.Smartphone, null); Spacer(Modifier.width(8.dp)); Text("📱 ابزارهای گوشی و Runtime") } }
+            item { OutlinedButton(openVoice, Modifier.fillMaxWidth().height(52.dp)) { Icon(Icons.Default.Mic, null); Spacer(Modifier.width(8.dp)); Text("🎙️ Voice") } }
+            item { OutlinedButton(openRubika, Modifier.fillMaxWidth().height(52.dp)) { Icon(Icons.Default.Send, null); Spacer(Modifier.width(8.dp)); Text(if (rubikaConfigured) "🤖 Rubika Bot ✓" else "🤖 راه‌اندازی Rubika Bot") } }
             item {
                 Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("🧠 حافظه V17", fontSize = 18.sp); Text("حافظه‌های ذخیره‌شده: $memoryCount")
@@ -81,18 +86,18 @@ private fun V17Home(
             item {
                 Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("👤 حساب", fontSize = 18.sp); Text(accountEmail ?: "هنوز حساب ایمیلی ثبت نشده")
-                    Text("زیرساخت هویت ایمیل فعلاً محلی است و احراز هویت سروری بعداً متصل می‌شود.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("هویت ایمیل فعلاً محلی است؛ ورود سروری بدون بک‌اند واقعی ادعا نمی‌شود.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } }
             }
             item {
                 Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("♻️ خودبهبوددهی", fontSize = 18.sp)
-                    Text("چرخهٔ تحقیق → پیشنهاد → اعتبارسنجی → آماده‌سازی به‌روزرسانی.", fontSize = 13.sp)
+                    Text("♻️ خودبهبوددهی کنترل‌شده", fontSize = 18.sp)
+                    Text("تحقیق → پیشنهاد → اعتبارسنجی → Build/Test → آماده‌سازی نسخه؛ فعال‌سازی تغییرات حساس بدون کنترل کاربر انجام نمی‌شود.", fontSize = 13.sp)
                     Row(verticalAlignment = Alignment.CenterVertically) { Text("فعال", Modifier.weight(1f)); Switch(checked = selfImprovementEnabled, onCheckedChange = { selfImprovementEnabled = it; setSelfImprovementEnabled(it) }) }
                     Text("وضعیت: ${selfImprovementState.lastResult}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } }
             }
-            item { Text("🛡️ V17.1 Focus", fontSize = 17.sp); Text("Local Runtime → APK Build/Test/Repair → Phone Tools → Rubika Bot Tools", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            item { Text("🛡️ V17.1", fontSize = 17.sp); Text("Local Build/Test/Repair • Phone Intents • Voice • Rubika Polling/AI/Owner Policy", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
 }

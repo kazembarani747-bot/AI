@@ -15,12 +15,13 @@ class V171RubikaWorker(appContext: Context, params: WorkerParameters) : Coroutin
 
         return runCatching {
             val client = V171RubikaClient(token)
-            var offset = applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(OFFSET, null)
+            val prefs = applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val offset = prefs.getString(OFFSET, null)
             val updates = client.getUpdates(limit = 20, offsetId = offset)
             val newOffset = updates.optString("next_offset_id").takeIf { it.isNotBlank() }
-            if (newOffset != null) applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(OFFSET, newOffset).apply()
+            if (newOffset != null) prefs.edit().putString(OFFSET, newOffset).apply()
 
-            val list = updates.optJSONArray("updates") ?: updates.optJSONArray("data") ?: return@runCatching Result.success()
+            val list = updates.optJSONArray("updates") ?: return@runCatching Result.success()
             val autoReply = V171RubikaStore.autoReply(applicationContext)
             val removeLinks = V171RubikaStore.removeLinks(applicationContext)
             val funny = V171RubikaStore.funnyMode(applicationContext)
@@ -44,13 +45,15 @@ class V171RubikaWorker(appContext: Context, params: WorkerParameters) : Coroutin
         removeLinks: Boolean,
         funny: Boolean
     ) {
-        val message = update.optJSONObject("message") ?: update.optJSONObject("new_message") ?: update
+        // Rubika updates carry chat_id/type at update level and the actual message in new_message.
+        val message = update.optJSONObject("new_message") ?: update.optJSONObject("message") ?: return
+        if (message.optString("sender_type").equals("Bot", ignoreCase = true)) return
         val text = message.optString("text").trim()
-        val chatId = message.optString("chat_id").takeIf { it.isNotBlank() }
-            ?: message.optJSONObject("chat")?.optString("chat_id")?.takeIf { it.isNotBlank() }
+        val chatId = update.optString("chat_id").takeIf { it.isNotBlank() }
+            ?: message.optString("chat_id").takeIf { it.isNotBlank() }
         val messageId = message.optString("message_id").takeIf { it.isNotBlank() }
-        val sender = message.optJSONObject("sender")?.optString("user_id")?.takeIf { it.isNotBlank() }
-            ?: message.optString("sender_id").takeIf { it.isNotBlank() }
+        val sender = message.optString("sender_id").takeIf { it.isNotBlank() }
+            ?: message.optJSONObject("sender")?.optString("user_id")?.takeIf { it.isNotBlank() }
         if (text.isBlank() || chatId == null) return
 
         val parsed = V171RubikaMessagePolicy.parse(text, sender, chatId, messageId, ownerId)
@@ -59,6 +62,8 @@ class V171RubikaWorker(appContext: Context, params: WorkerParameters) : Coroutin
             return
         }
 
+        // Editing is intentionally limited to owner messages. Removing another user's message
+        // requires the bot to have the required chat permissions; never pretend otherwise.
         if (removeLinks && parsed.links.isNotEmpty() && parsed.isOwner) {
             val cleaned = V171RubikaMessagePolicy.applyLinkPolicy(parsed, true)
             if (cleaned != text && messageId != null) {

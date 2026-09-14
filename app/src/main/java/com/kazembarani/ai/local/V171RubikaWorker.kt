@@ -45,20 +45,18 @@ class V171RubikaWorker(appContext: Context, params: WorkerParameters) : Coroutin
         removeLinks: Boolean,
         funny: Boolean
     ) {
-        // Rubika updates carry chat_id/type at update level and the actual message in new_message.
-        val message = update.optJSONObject("new_message") ?: update.optJSONObject("message") ?: return
-        if (message.optString("sender_type").equals("Bot", ignoreCase = true)) return
-        val text = message.optString("text").trim()
-        val chatId = update.optString("chat_id").takeIf { it.isNotBlank() }
-            ?: message.optString("chat_id").takeIf { it.isNotBlank() }
-        val messageId = message.optString("message_id").takeIf { it.isNotBlank() }
-        val sender = message.optString("sender_id").takeIf { it.isNotBlank() }
-            ?: message.optJSONObject("sender")?.optString("user_id")?.takeIf { it.isNotBlank() }
-        if (text.isBlank() || chatId == null) return
+        val parsedUpdate = V171RubikaUpdateParser.parse(update) ?: return
+        if (parsedUpdate.senderIsBot) return
 
-        val parsed = V171RubikaMessagePolicy.parse(text, sender, chatId, messageId, ownerId)
-        if (parsed.isOwner && text.startsWith("/")) {
-            handleOwnerCommand(client, chatId, messageId, text)
+        val parsed = V171RubikaMessagePolicy.parse(
+            parsedUpdate.text,
+            parsedUpdate.senderId,
+            parsedUpdate.chatId,
+            parsedUpdate.messageId,
+            ownerId
+        )
+        if (parsed.isOwner && parsedUpdate.text.startsWith("/")) {
+            handleOwnerCommand(client, parsedUpdate.chatId!!, parsedUpdate.messageId, parsedUpdate.text)
             return
         }
 
@@ -66,15 +64,15 @@ class V171RubikaWorker(appContext: Context, params: WorkerParameters) : Coroutin
         // requires the bot to have the required chat permissions; never pretend otherwise.
         if (removeLinks && parsed.links.isNotEmpty() && parsed.isOwner) {
             val cleaned = V171RubikaMessagePolicy.applyLinkPolicy(parsed, true)
-            if (cleaned != text && messageId != null) {
-                runCatching { client.editMessageText(chatId, messageId, cleaned) }
+            if (cleaned != parsedUpdate.text && parsedUpdate.messageId != null) {
+                runCatching { client.editMessageText(parsedUpdate.chatId!!, parsedUpdate.messageId, cleaned) }
             }
         }
 
         if (!autoReply || ai == null) return
-        val prompt = if (funny) "با لحن دوستانه و کمی شوخ‌طبع، بدون توهین، به این پیام پاسخ بده:\n$text" else text
+        val prompt = if (funny) "با لحن دوستانه و کمی شوخ‌طبع، بدون توهین، به این پیام پاسخ بده:\n${parsedUpdate.text}" else parsedUpdate.text
         val answer = runCatching { ai.ask(prompt) }.getOrElse { return }
-        if (answer.isNotBlank()) client.sendMessage(chatId, answer.take(3500), messageId)
+        if (answer.isNotBlank()) client.sendMessage(parsedUpdate.chatId!!, answer.take(3500), parsedUpdate.messageId)
     }
 
     private suspend fun handleOwnerCommand(client: V171RubikaClient, chatId: String, replyTo: String?, text: String) {

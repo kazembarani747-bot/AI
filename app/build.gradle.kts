@@ -12,8 +12,8 @@ android {
         applicationId = "com.kazembarani.ai"
         minSdk = 26
         targetSdk = 35
-        versionCode = 171
-        versionName = "17.1"
+        versionCode = 172
+        versionName = "17.2"
         buildConfigField("String", "AI_API_URL", "\"\"")
         buildConfigField("String", "RUNTIME_URL", "\"\"")
         buildConfigField("String", "RUNTIME_TOKEN", "\"\"")
@@ -37,5 +37,6 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20260814")
     androidTestImplementation("androidx.test:core:1.6.1"); androidTestImplementation("androidx.test.ext:junit:1.2.1"); androidTestImplementation("androidx.test:runner:1.6.2")
 }

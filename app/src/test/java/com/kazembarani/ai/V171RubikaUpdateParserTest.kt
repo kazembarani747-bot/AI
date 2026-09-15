@@ -30,6 +30,20 @@ class V171RubikaUpdateParserTest {
     }
 
     @Test
+    fun parsesChatIdFromMessageWhenUpdateOmitsIt() {
+        val update = JSONObject()
+            .put("new_message", JSONObject()
+                .put("chat_id", "u789")
+                .put("sender_id", "u456")
+                .put("text", "hello"))
+
+        val parsed = V171RubikaUpdateParser.parse(update)
+
+        assertEquals("u789", parsed?.chatId)
+        assertEquals("hello", parsed?.text)
+    }
+
+    @Test
     fun rejectsBotMessages() {
         val update = JSONObject()
             .put("chat_id", "u123")

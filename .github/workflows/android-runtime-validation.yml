@@ -49,6 +49,7 @@ jobs:
           profile: pixel_2
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          # Keep the runner script on one shell line: this action executes script lines separately.
           script: adb install -r app/build/outputs/apk/debug/app-debug.apk && gradle --no-daemon connectedDebugAndroidTest; test_status=$?; adb shell am force-stop com.kazembarani.ai || true; adb shell monkey -p com.kazembarani.ai 1 || true; sleep 3; mkdir -p runtime-diagnostics; adb logcat -d -t 1500 > runtime-diagnostics/logcat.txt || true; adb shell dumpsys package com.kazembarani.ai > runtime-diagnostics/package.txt || true; adb shell wm size > runtime-diagnostics/display.txt || true; adb exec-out screencap -p > runtime-diagnostics/screenshot.png || true; exit $test_status
 
       - name: Upload V17.1 APK and Android diagnostics

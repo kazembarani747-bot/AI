@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: android-apk-${{ github.ref }}
@@ -34,9 +34,28 @@ jobs:
           cache-read-only: false
       - name: Build debug APK
         run: gradle :app:assembleDebug --no-daemon --parallel --build-cache
-      - name: Upload APK
+      - name: Verify V17.1 package
+        run: |
+          test -f app/build/outputs/apk/debug/app-debug.apk
+          echo "V17.1 APK ready: $(stat -c%s app/build/outputs/apk/debug/app-debug.apk) bytes"
+      - name: Create APK SHA-256
+        run: sha256sum app/build/outputs/apk/debug/app-debug.apk > app/build/outputs/apk/debug/app-debug.apk.sha256
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: AI-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/debug/app-debug.apk.sha256
           retention-days: 30
+      - name: Publish public V17.1 release build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v17.1-build-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" \
+            app/build/outputs/apk/debug/app-debug.apk \
+            app/build/outputs/apk/debug/app-debug.apk.sha256 \
+            --title "AI 17.1 Build ${GITHUB_RUN_NUMBER}" \
+            --notes "Automated V17.1 build from commit ${GITHUB_SHA}. Built by GitHub Actions after the Gradle build completed successfully." \
+            --target "${GITHUB_SHA}"

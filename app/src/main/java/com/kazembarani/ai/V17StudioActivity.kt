@@ -2,8 +2,10 @@ package com.kazembarani.ai
 
 import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
@@ -20,6 +22,8 @@ import com.kazembarani.ai.local.V17MemoryStore
 import com.kazembarani.ai.local.V17SelfImprovementStore
 import com.kazembarani.ai.local.V171RubikaScheduler
 import com.kazembarani.ai.local.V171RubikaStore
+import com.kazembarani.ai.local.V171SelfUpdateManager
+import kotlinx.coroutines.launch
 
 class V17StudioActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,9 +44,32 @@ class V17StudioActivity : ComponentActivity() {
                 openWorkspace = { startActivity(Intent(this, PhoneWorkspaceActivity::class.java)) },
                 openRubika = { startActivity(Intent(this, V171RubikaActivity::class.java)) },
                 openVoice = { startActivity(Intent(this, V171VoiceActivity::class.java)) },
+                checkUpdate = { checkForUpdate() },
                 saveMemory = { V17MemoryStore.add(this, it) },
                 setSelfImprovementEnabled = { V17SelfImprovementStore.setEnabled(this, it) }
             )
+        }
+    }
+
+    private fun checkForUpdate() {
+        lifecycleScope.launch {
+            val manager = V171SelfUpdateManager(this@V17StudioActivity)
+            when (val result = manager.checkLatest()) {
+                is V171SelfUpdateManager.CheckResult.UpToDate ->
+                    Toast.makeText(this@V17StudioActivity, "نسخه 17.1 شما به‌روز است (${result.tag}) ✓", Toast.LENGTH_LONG).show()
+                is V171SelfUpdateManager.CheckResult.Failed ->
+                    Toast.makeText(this@V17StudioActivity, result.message, Toast.LENGTH_LONG).show()
+                is V171SelfUpdateManager.CheckResult.UpdateAvailable -> {
+                    Toast.makeText(this@V17StudioActivity, "نسخه جدید پیدا شد؛ در حال دانلود…", Toast.LENGTH_SHORT).show()
+                    runCatching {
+                        val apk = manager.download(result.release)
+                        manager.clearOldUpdates(apk)
+                        startActivity(manager.installIntent(apk))
+                    }.onFailure {
+                        Toast.makeText(this@V17StudioActivity, "دانلود/آماده‌سازی به‌روزرسانی ناموفق بود: ${it.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
         }
     }
 }
@@ -57,6 +84,7 @@ private fun V17Home(
     openWorkspace: () -> Unit,
     openRubika: () -> Unit,
     openVoice: () -> Unit,
+    checkUpdate: () -> Unit,
     saveMemory: (String) -> Unit,
     setSelfImprovementEnabled: (Boolean) -> Unit
 ) {
@@ -76,6 +104,7 @@ private fun V17Home(
             item { OutlinedButton(openWorkspace, Modifier.fillMaxWidth().height(52.dp)) { Icon(Icons.Default.Smartphone, null); Spacer(Modifier.width(8.dp)); Text("📱 ابزارهای گوشی و Runtime") } }
             item { OutlinedButton(openVoice, Modifier.fillMaxWidth().height(52.dp)) { Icon(Icons.Default.Mic, null); Spacer(Modifier.width(8.dp)); Text("🎙️ Voice") } }
             item { OutlinedButton(openRubika, Modifier.fillMaxWidth().height(52.dp)) { Icon(Icons.Default.Send, null); Spacer(Modifier.width(8.dp)); Text(if (rubikaConfigured) "🤖 Rubika Bot ✓" else "🤖 راه‌اندازی Rubika Bot") } }
+            item { OutlinedButton(checkUpdate, Modifier.fillMaxWidth().height(52.dp)) { Icon(Icons.Default.SystemUpdate, null); Spacer(Modifier.width(8.dp)); Text("⬇️ بررسی و به‌روزرسانی AI 17.1") } }
             item {
                 Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("🧠 حافظه V17", fontSize = 18.sp); Text("حافظه‌های ذخیره‌شده: $memoryCount")
@@ -97,7 +126,7 @@ private fun V17Home(
                     Text("وضعیت: ${selfImprovementState.lastResult}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } }
             }
-            item { Text("🛡️ V17.1", fontSize = 17.sp); Text("Local Build/Test/Repair • Phone Intents • Voice • Rubika Polling/AI/Owner Policy", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            item { Text("🛡️ V17.1", fontSize = 17.sp); Text("Local Build/Test/Repair • Phone Intents • Voice • Rubika Polling/AI/Owner Policy • Controlled Self-Update", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
 }
